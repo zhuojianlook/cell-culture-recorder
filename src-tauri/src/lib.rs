@@ -3,12 +3,20 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 const DB_URL: &str = "sqlite:cell-culture-recorder.db";
 
 fn migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "create_cell_culture_records",
-        sql: include_str!("../migrations/001_initial_schema.sql"),
-        kind: MigrationKind::Up,
-    }]
+    vec![
+        Migration {
+            version: 1,
+            description: "create_cell_culture_records",
+            sql: include_str!("../migrations/001_initial_schema.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "add_donor_vessel_lineage_fields",
+            sql: include_str!("../migrations/002_donor_vessel_lineage.sql"),
+            kind: MigrationKind::Up,
+        },
+    ]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

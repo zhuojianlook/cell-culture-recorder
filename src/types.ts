@@ -1,5 +1,7 @@
 export type CultureStatus = "active" | "frozen" | "discarded" | "contaminated";
 
+export type Eye = "OD" | "OS" | "OU" | "unknown";
+
 export type EventType =
   | "feeding"
   | "passage"
@@ -36,6 +38,14 @@ export interface CultureBatch {
   started_at: string;
   last_event_at: string | null;
   notes: string | null;
+  donor_identifier: string | null;
+  eye: Eye | null;
+  parent_batch_id: number | null;
+  split_date: string | null;
+  media_change_1_date: string | null;
+  media_change_2_date: string | null;
+  growth_notes: string | null;
+  source_documentation: string | null;
   created_at: string;
   updated_at: string | null;
   deleted_at: string | null;
@@ -44,6 +54,8 @@ export interface CultureBatch {
 export interface CultureBatchView extends CultureBatch {
   cell_line_name: string;
   species: string;
+  parent_label: string | null;
+  child_count: number;
 }
 
 export interface CultureEvent {
@@ -78,25 +90,24 @@ export interface BackupSnapshot {
   created_at: string;
 }
 
-export interface CreateCellLineInput {
-  name: string;
-  species: string;
-  tissue: string | null;
-  source: string | null;
-  identifiers: string | null;
-  notes: string | null;
-}
-
-export interface CreateBatchInput {
-  cell_line_id: number;
+export interface CreateVesselInput {
+  culture_name: string;
+  donor_identifier: string | null;
+  eye: Eye;
   label: string;
   passage_number: number;
   vessel: string;
+  parent_batch_id: number | null;
+  started_at: string;
+  split_date: string | null;
+  media_change_1_date: string | null;
+  media_change_2_date: string | null;
   medium: string | null;
   seeding_density: string | null;
   incubator_location: string | null;
-  started_at: string;
-  notes: string | null;
+  status: CultureStatus;
+  growth_notes: string | null;
+  source_documentation: string | null;
 }
 
 export interface CreateEventInput {
@@ -116,7 +127,7 @@ export interface CreateEventInput {
 
 export interface BackupPackage {
   app: "cell-culture-recorder";
-  version: 1;
+  version: 2;
   exportedAt: string;
   checksum: string;
   data: {
@@ -135,8 +146,7 @@ export interface CultureStore {
   listEvents(batchId?: number): Promise<CultureEvent[]>;
   listAuditEntries(limit?: number): Promise<AuditEntry[]>;
   listBackups(limit?: number): Promise<BackupSnapshot[]>;
-  createCellLine(input: CreateCellLineInput): Promise<void>;
-  createBatch(input: CreateBatchInput): Promise<void>;
+  createVessel(input: CreateVesselInput): Promise<number>;
   recordEvent(input: CreateEventInput): Promise<void>;
   exportBackup(label: string): Promise<BackupPackage>;
   restoreBackup(pkg: BackupPackage): Promise<void>;

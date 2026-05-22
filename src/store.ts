@@ -4,9 +4,8 @@ import type {
   BackupPackage,
   BackupSnapshot,
   CellLine,
-  CreateBatchInput,
-  CreateCellLineInput,
   CreateEventInput,
+  CreateVesselInput,
   CultureBatch,
   CultureBatchView,
   CultureEvent,
@@ -15,7 +14,7 @@ import type {
 import { sha256 } from "./utils";
 
 const DB_URL = "sqlite:cell-culture-recorder.db";
-const MEMORY_KEY = "cell-culture-recorder.preview-store.v1";
+const MEMORY_KEY = "cell-culture-recorder.preview-store.v2";
 
 type SqlDatabase = Awaited<ReturnType<typeof Database.load>>;
 
@@ -84,7 +83,7 @@ async function buildBackupPackage(
 
   return {
     app: "cell-culture-recorder",
-    version: 1,
+    version: 2,
     exportedAt: timestamp(),
     checksum,
     data,
@@ -92,7 +91,7 @@ async function buildBackupPackage(
 }
 
 async function assertValidBackup(pkg: BackupPackage): Promise<void> {
-  if (pkg.app !== "cell-culture-recorder" || pkg.version !== 1) {
+  if (pkg.app !== "cell-culture-recorder" || ![1, 2].includes(Number(pkg.version))) {
     throw new Error("This file is not a compatible Cell Culture Recorder backup.");
   }
 
@@ -100,6 +99,20 @@ async function assertValidBackup(pkg: BackupPackage): Promise<void> {
   if (checksum !== pkg.checksum) {
     throw new Error("Backup checksum mismatch. The backup may be incomplete or modified.");
   }
+}
+
+function normalizeBatch(batch: CultureBatch): CultureBatch {
+  return {
+    ...batch,
+    donor_identifier: batch.donor_identifier ?? null,
+    eye: batch.eye ?? "unknown",
+    parent_batch_id: batch.parent_batch_id ?? null,
+    split_date: batch.split_date ?? null,
+    media_change_1_date: batch.media_change_1_date ?? null,
+    media_change_2_date: batch.media_change_2_date ?? null,
+    growth_notes: batch.growth_notes ?? batch.notes ?? null,
+    source_documentation: batch.source_documentation ?? null,
+  };
 }
 
 export async function createCultureStore(): Promise<CultureStore> {
@@ -135,18 +148,25 @@ class SqlCultureStore implements CultureStore {
 
   async listBatches(): Promise<CultureBatchView[]> {
     return this.select<CultureBatchView[]>(
-      `SELECT culture_batches.*, cell_lines.name AS cell_line_name, cell_lines.species AS species
+      `SELECT culture_batches.*,
+              cell_lines.name AS cell_line_name,
+              cell_lines.species AS species,
+              parent.label AS parent_label,
+              (
+                SELECT COUNT(*)
+                FROM culture_batches child
+                WHERE child.parent_batch_id = culture_batches.id
+                  AND child.deleted_at IS NULL
+              ) AS child_count
        FROM culture_batches
        JOIN cell_lines ON cell_lines.id = culture_batches.cell_line_id
+       LEFT JOIN culture_batches parent ON parent.id = culture_batches.parent_batch_id
        WHERE culture_batches.deleted_at IS NULL AND cell_lines.deleted_at IS NULL
        ORDER BY
-         CASE culture_batches.status
-           WHEN 'active' THEN 0
-           WHEN 'contaminated' THEN 1
-           WHEN 'frozen' THEN 2
-           ELSE 3
-         END,
-         COALESCE(culture_batches.last_event_at, culture_batches.started_at) DESC`,
+         COALESCE(culture_batches.donor_identifier, '') COLLATE NOCASE,
+         COALESCE(culture_batches.eye, '') COLLATE NOCASE,
+         culture_batches.passage_number,
+         COALESCE(culture_batches.started_at, '')`,
     );
   }
 
@@ -158,9 +178,7 @@ class SqlCultureStore implements CultureStore {
       );
     }
 
-    return this.select<CultureEvent[]>(
-      "SELECT * FROM culture_events ORDER BY event_at DESC, id DESC LIMIT 150",
-    );
+    return this.select<CultureEvent[]>("SELECT * FROM culture_events ORDER BY event_at DESC, id DESC LIMIT 300");
   }
 
   async listAuditEntries(limit = 25): Promise<AuditEntry[]> {
@@ -177,22 +195,11 @@ class SqlCultureStore implements CultureStore {
     );
   }
 
-  async createCellLine(input: CreateCellLineInput): Promise<void> {
-    await this.transaction(async () => {
-      await this.execute(
-        `INSERT INTO cell_lines (name, species, tissue, source, identifiers, notes)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [input.name, input.species, input.tissue, input.source, input.identifiers, input.notes],
-      );
-      const id = await this.lastInsertId();
-      await this.writeAudit("cell_line", id, "CREATE", input);
-    });
+  async createVessel(input: CreateVesselInput): Promise<number> {
+    let newId = 0;
 
-    await this.saveSnapshot("Auto snapshot after cell line save");
-  }
-
-  async createBatch(input: CreateBatchInput): Promise<void> {
     await this.transaction(async () => {
+      const cellLineId = await this.resolveCellLine(input.culture_name);
       await this.execute(
         `INSERT INTO culture_batches (
           cell_line_id,
@@ -202,28 +209,47 @@ class SqlCultureStore implements CultureStore {
           medium,
           seeding_density,
           incubator_location,
+          status,
           started_at,
           last_event_at,
-          notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          notes,
+          donor_identifier,
+          eye,
+          parent_batch_id,
+          split_date,
+          media_change_1_date,
+          media_change_2_date,
+          growth_notes,
+          source_documentation
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          input.cell_line_id,
+          cellLineId,
           input.label,
           input.passage_number,
           input.vessel,
           input.medium,
           input.seeding_density,
           input.incubator_location,
+          input.status,
           input.started_at,
           input.started_at,
-          input.notes,
+          input.growth_notes,
+          input.donor_identifier,
+          input.eye,
+          input.parent_batch_id,
+          input.split_date,
+          input.media_change_1_date,
+          input.media_change_2_date,
+          input.growth_notes,
+          input.source_documentation,
         ],
       );
-      const id = await this.lastInsertId();
-      await this.writeAudit("culture_batch", id, "CREATE", input);
+      newId = await this.lastInsertId();
+      await this.writeAudit("culture_vessel", newId, "CREATE", input);
     });
 
-    await this.saveSnapshot("Auto snapshot after culture start");
+    await this.saveSnapshot("Auto snapshot after vessel intake");
+    return newId;
   }
 
   async recordEvent(input: CreateEventInput): Promise<void> {
@@ -307,43 +333,18 @@ class SqlCultureStore implements CultureStore {
         );
       }
 
-      for (const batch of pkg.data.cultureBatches) {
-        await this.execute(
-          `INSERT INTO culture_batches (
-            id,
-            cell_line_id,
-            label,
-            passage_number,
-            vessel,
-            medium,
-            seeding_density,
-            incubator_location,
-            status,
-            started_at,
-            last_event_at,
-            notes,
-            created_at,
-            updated_at,
-            deleted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
+      const batches = pkg.data.cultureBatches.map(normalizeBatch);
+      for (const batch of batches) {
+        await this.insertRestoredBatch({ ...batch, parent_batch_id: null });
+      }
+
+      for (const batch of batches) {
+        if (batch.parent_batch_id !== null) {
+          await this.execute("UPDATE culture_batches SET parent_batch_id = ? WHERE id = ?", [
+            batch.parent_batch_id,
             batch.id,
-            batch.cell_line_id,
-            batch.label,
-            batch.passage_number,
-            batch.vessel,
-            batch.medium,
-            batch.seeding_density,
-            batch.incubator_location,
-            batch.status,
-            batch.started_at,
-            batch.last_event_at,
-            batch.notes,
-            batch.created_at,
-            batch.updated_at,
-            batch.deleted_at,
-          ],
-        );
+          ]);
+        }
       }
 
       for (const event of pkg.data.cultureEvents) {
@@ -387,10 +388,80 @@ class SqlCultureStore implements CultureStore {
     });
   }
 
+  private async resolveCellLine(cultureName: string): Promise<number> {
+    await this.execute(
+      `INSERT OR IGNORE INTO cell_lines (name, species, tissue, source, notes)
+       VALUES (?, 'Human', 'Cornea', 'Donor-derived culture', 'Created from vessel intake')`,
+      [cultureName],
+    );
+    const rows = await this.select<Array<{ id: number }>>("SELECT id FROM cell_lines WHERE name = ? LIMIT 1", [
+      cultureName,
+    ]);
+    if (!rows[0]) {
+      throw new Error("Could not resolve culture type.");
+    }
+    return rows[0].id;
+  }
+
+  private async insertRestoredBatch(batch: CultureBatch): Promise<void> {
+    await this.execute(
+      `INSERT INTO culture_batches (
+        id,
+        cell_line_id,
+        label,
+        passage_number,
+        vessel,
+        medium,
+        seeding_density,
+        incubator_location,
+        status,
+        started_at,
+        last_event_at,
+        notes,
+        donor_identifier,
+        eye,
+        parent_batch_id,
+        split_date,
+        media_change_1_date,
+        media_change_2_date,
+        growth_notes,
+        source_documentation,
+        created_at,
+        updated_at,
+        deleted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        batch.id,
+        batch.cell_line_id,
+        batch.label,
+        batch.passage_number,
+        batch.vessel,
+        batch.medium,
+        batch.seeding_density,
+        batch.incubator_location,
+        batch.status,
+        batch.started_at,
+        batch.last_event_at,
+        batch.notes,
+        batch.donor_identifier,
+        batch.eye,
+        batch.parent_batch_id,
+        batch.split_date,
+        batch.media_change_1_date,
+        batch.media_change_2_date,
+        batch.growth_notes,
+        batch.source_documentation,
+        batch.created_at,
+        batch.updated_at,
+        batch.deleted_at,
+      ],
+    );
+  }
+
   private async makeBackupPackage(): Promise<BackupPackage> {
     return buildBackupPackage(
       await this.select<CellLine[]>("SELECT * FROM cell_lines ORDER BY id"),
-      await this.select<CultureBatch[]>("SELECT * FROM culture_batches ORDER BY id"),
+      (await this.select<CultureBatch[]>("SELECT * FROM culture_batches ORDER BY id")).map(normalizeBatch),
       await this.select<CultureEvent[]>("SELECT * FROM culture_events ORDER BY id"),
       await this.select<AuditEntry[]>("SELECT * FROM audit_log ORDER BY id"),
     );
@@ -483,26 +554,28 @@ class MemoryCultureStore implements CultureStore {
 
   async listBatches(): Promise<CultureBatchView[]> {
     const cellLines = new Map(this.state.cellLines.map((item) => [item.id, item]));
+    const children = new Map<number, number>();
+    this.state.cultureBatches.forEach((batch) => {
+      if (batch.parent_batch_id !== null && batch.deleted_at === null) {
+        children.set(batch.parent_batch_id, (children.get(batch.parent_batch_id) ?? 0) + 1);
+      }
+    });
+
     return clone(
       this.state.cultureBatches
         .filter((item) => item.deleted_at === null)
         .map((batch) => {
           const cellLine = cellLines.get(batch.cell_line_id);
+          const parent = this.state.cultureBatches.find((item) => item.id === batch.parent_batch_id);
           return {
-            ...batch,
-            cell_line_name: cellLine?.name ?? "Unknown cell line",
+            ...normalizeBatch(batch),
+            cell_line_name: cellLine?.name ?? "Unknown culture",
             species: cellLine?.species ?? "",
+            parent_label: parent?.label ?? null,
+            child_count: children.get(batch.id) ?? 0,
           };
         })
-        .sort((a, b) => {
-          const statusWeight = (status: CultureBatch["status"]): number =>
-            status === "active" ? 0 : status === "contaminated" ? 1 : status === "frozen" ? 2 : 3;
-          const statusDelta = statusWeight(a.status) - statusWeight(b.status);
-          if (statusDelta !== 0) {
-            return statusDelta;
-          }
-          return (b.last_event_at ?? b.started_at).localeCompare(a.last_event_at ?? a.started_at);
-        }),
+        .sort(compareBatches),
     );
   }
 
@@ -532,34 +605,39 @@ class MemoryCultureStore implements CultureStore {
     );
   }
 
-  async createCellLine(input: CreateCellLineInput): Promise<void> {
-    const row: CellLine = {
-      id: this.state.nextCellLineId++,
-      ...input,
-      created_at: timestamp(),
-      updated_at: null,
-      deleted_at: null,
-    };
-    this.state.cellLines.push(row);
-    this.audit("cell_line", row.id, "CREATE", input);
-    await this.saveSnapshot("Auto snapshot after cell line save");
-    await this.persist();
-  }
-
-  async createBatch(input: CreateBatchInput): Promise<void> {
+  async createVessel(input: CreateVesselInput): Promise<number> {
+    const cellLineId = this.resolveCellLine(input.culture_name);
     const row: CultureBatch = {
       id: this.state.nextBatchId++,
-      ...input,
-      status: "active",
+      cell_line_id: cellLineId,
+      label: input.label,
+      passage_number: input.passage_number,
+      vessel: input.vessel,
+      medium: input.medium,
+      seeding_density: input.seeding_density,
+      incubator_location: input.incubator_location,
+      status: input.status,
+      started_at: input.started_at,
       last_event_at: input.started_at,
+      notes: input.growth_notes,
+      donor_identifier: input.donor_identifier,
+      eye: input.eye,
+      parent_batch_id: input.parent_batch_id,
+      split_date: input.split_date,
+      media_change_1_date: input.media_change_1_date,
+      media_change_2_date: input.media_change_2_date,
+      growth_notes: input.growth_notes,
+      source_documentation: input.source_documentation,
       created_at: timestamp(),
       updated_at: null,
       deleted_at: null,
     };
+
     this.state.cultureBatches.push(row);
-    this.audit("culture_batch", row.id, "CREATE", input);
-    await this.saveSnapshot("Auto snapshot after culture start");
+    this.audit("culture_vessel", row.id, "CREATE", input);
+    await this.saveSnapshot("Auto snapshot after vessel intake");
     await this.persist();
+    return row.id;
   }
 
   async recordEvent(input: CreateEventInput): Promise<void> {
@@ -609,7 +687,7 @@ class MemoryCultureStore implements CultureStore {
     await this.insertSnapshot("Auto snapshot before restore", beforeRestore);
 
     this.state.cellLines = clone(pkg.data.cellLines);
-    this.state.cultureBatches = clone(pkg.data.cultureBatches);
+    this.state.cultureBatches = clone(pkg.data.cultureBatches.map(normalizeBatch));
     this.state.cultureEvents = clone(pkg.data.cultureEvents);
     this.state.auditLog = clone(pkg.data.auditLog);
     this.rebuildCounters();
@@ -621,10 +699,34 @@ class MemoryCultureStore implements CultureStore {
     await this.persist();
   }
 
+  private resolveCellLine(cultureName: string): number {
+    const existing = this.state.cellLines.find(
+      (line) => line.name.toLowerCase() === cultureName.toLowerCase() && line.deleted_at === null,
+    );
+    if (existing) {
+      return existing.id;
+    }
+
+    const row: CellLine = {
+      id: this.state.nextCellLineId++,
+      name: cultureName,
+      species: "Human",
+      tissue: "Cornea",
+      source: "Donor-derived culture",
+      identifiers: null,
+      notes: "Created from vessel intake",
+      created_at: timestamp(),
+      updated_at: null,
+      deleted_at: null,
+    };
+    this.state.cellLines.push(row);
+    return row.id;
+  }
+
   private async makeBackupPackage(): Promise<BackupPackage> {
     return buildBackupPackage(
       this.state.cellLines,
-      this.state.cultureBatches,
+      this.state.cultureBatches.map(normalizeBatch),
       this.state.cultureEvents,
       this.state.auditLog,
     );
@@ -675,19 +777,19 @@ class MemoryCultureStore implements CultureStore {
     const createdAt = timestamp();
     return {
       nextCellLineId: 2,
-      nextBatchId: 2,
-      nextEventId: 2,
-      nextAuditId: 2,
+      nextBatchId: 5,
+      nextEventId: 3,
+      nextAuditId: 4,
       nextBackupId: 1,
       cellLines: [
         {
           id: 1,
-          name: "HEK293T",
+          name: "Corneal endothelial culture",
           species: "Human",
-          tissue: "Embryonic kidney",
-          source: "ATCC",
-          identifiers: "Preview data",
-          notes: "Browser preview sample. Tauri runtime uses the SQL database.",
+          tissue: "Cornea",
+          source: "Donor-derived culture",
+          identifiers: null,
+          notes: "Preview donor culture type.",
           created_at: createdAt,
           updated_at: null,
           deleted_at: null,
@@ -697,16 +799,99 @@ class MemoryCultureStore implements CultureStore {
         {
           id: 1,
           cell_line_id: 1,
-          label: "HEK293T P18 T75-A",
-          passage_number: 18,
-          vessel: "T75 flask",
-          medium: "DMEM + 10% FBS",
-          seeding_density: "1.5e6 cells",
-          incubator_location: "Incubator 2 / Shelf B",
+          label: "6769 OD T25",
+          passage_number: 0,
+          vessel: "T25 flask",
+          medium: "F99 + 8% FBS",
+          seeding_density: "Primary isolation",
+          incubator_location: "Incubator 1 / Shelf A",
           status: "active",
-          started_at: createdAt.slice(0, 10),
-          last_event_at: createdAt,
-          notes: "Preview culture.",
+          started_at: "2026-05-01",
+          last_event_at: "2026-05-01",
+          notes: "Primary donor isolation.",
+          donor_identifier: "6769",
+          eye: "OD",
+          parent_batch_id: null,
+          split_date: null,
+          media_change_1_date: "2026-05-04",
+          media_change_2_date: "2026-05-07",
+          growth_notes: "Primary culture established with moderate attachment.",
+          source_documentation: "Preview source note",
+          created_at: createdAt,
+          updated_at: null,
+          deleted_at: null,
+        },
+        {
+          id: 2,
+          cell_line_id: 1,
+          label: "6769 OD T75",
+          passage_number: 1,
+          vessel: "T75 flask",
+          medium: "F99 + 8% FBS",
+          seeding_density: "1:2 split",
+          incubator_location: "Incubator 1 / Shelf A",
+          status: "active",
+          started_at: "2026-05-10",
+          last_event_at: "2026-05-10",
+          notes: "Split from P0.",
+          donor_identifier: "6769",
+          eye: "OD",
+          parent_batch_id: 1,
+          split_date: "2026-05-10",
+          media_change_1_date: "2026-05-12",
+          media_change_2_date: null,
+          growth_notes: "Healthy cobblestone morphology.",
+          source_documentation: "Preview source note",
+          created_at: createdAt,
+          updated_at: null,
+          deleted_at: null,
+        },
+        {
+          id: 3,
+          cell_line_id: 1,
+          label: "6769 OD T75",
+          passage_number: 2,
+          vessel: "T75 flask",
+          medium: "F99 + 8% FBS",
+          seeding_density: "1:3 split",
+          incubator_location: "Incubator 2 / Shelf B",
+          status: "contaminated",
+          started_at: "2026-05-17",
+          last_event_at: "2026-05-19",
+          notes: "Contamination noted.",
+          donor_identifier: "6769",
+          eye: "OD",
+          parent_batch_id: 2,
+          split_date: "2026-05-17",
+          media_change_1_date: "2026-05-19",
+          media_change_2_date: null,
+          growth_notes: "Contaminated; keep record for lineage.",
+          source_documentation: "Poorly labelled flask: Donor 6769 OD P2 T75 contaminated",
+          created_at: createdAt,
+          updated_at: null,
+          deleted_at: null,
+        },
+        {
+          id: 4,
+          cell_line_id: 1,
+          label: "6769 OD T75",
+          passage_number: 2,
+          vessel: "T75 flask",
+          medium: "F99 + 8% FBS",
+          seeding_density: "1:3 split",
+          incubator_location: "Incubator 2 / Shelf C",
+          status: "active",
+          started_at: "2026-05-17",
+          last_event_at: "2026-05-20",
+          notes: "Sibling flask from same split.",
+          donor_identifier: "6769",
+          eye: "OD",
+          parent_batch_id: 2,
+          split_date: "2026-05-17",
+          media_change_1_date: "2026-05-20",
+          media_change_2_date: null,
+          growth_notes: "Duplicate label is intentional; sibling T75 from same split.",
+          source_documentation: "Preview duplicate-name sibling vessel",
           created_at: createdAt,
           updated_at: null,
           deleted_at: null,
@@ -715,16 +900,30 @@ class MemoryCultureStore implements CultureStore {
       cultureEvents: [
         {
           id: 1,
-          batch_id: 1,
-          event_type: "observation",
-          event_at: createdAt,
-          confluence_percent: 65,
+          batch_id: 3,
+          event_type: "contamination",
+          event_at: "2026-05-19T09:00",
+          confluence_percent: 60,
           viability_percent: null,
           split_ratio: null,
           medium: null,
           reagent_lot: null,
           operator: "Preview",
-          notes: "Cells are adherent with even distribution.",
+          notes: "Cloudy medium and debris observed.",
+          created_at: createdAt,
+        },
+        {
+          id: 2,
+          batch_id: 4,
+          event_type: "media_change",
+          event_at: "2026-05-20T11:00",
+          confluence_percent: 65,
+          viability_percent: null,
+          split_ratio: null,
+          medium: "F99 + 8% FBS",
+          reagent_lot: null,
+          operator: "Preview",
+          notes: "Sibling flask remains active.",
           created_at: createdAt,
         },
       ],
@@ -737,8 +936,34 @@ class MemoryCultureStore implements CultureStore {
           payload_json: "{}",
           created_at: createdAt,
         },
+        {
+          id: 2,
+          entity_type: "culture_vessel",
+          entity_id: 3,
+          operation: "CREATE",
+          payload_json: "{\"preview\":true}",
+          created_at: createdAt,
+        },
+        {
+          id: 3,
+          entity_type: "culture_vessel",
+          entity_id: 4,
+          operation: "CREATE",
+          payload_json: "{\"preview\":true}",
+          created_at: createdAt,
+        },
       ],
       backups: [],
     };
   }
+}
+
+function compareBatches(a: CultureBatchView, b: CultureBatchView): number {
+  return (
+    (a.donor_identifier ?? "").localeCompare(b.donor_identifier ?? "") ||
+    (a.eye ?? "").localeCompare(b.eye ?? "") ||
+    a.passage_number - b.passage_number ||
+    (a.started_at ?? "").localeCompare(b.started_at ?? "") ||
+    a.id - b.id
+  );
 }

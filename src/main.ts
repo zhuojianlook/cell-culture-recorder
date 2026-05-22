@@ -6,11 +6,13 @@ import type {
   BackupSnapshot,
   CellLine,
   CreateEventInput,
+  CreateVesselInput,
   CultureBatchView,
   CultureEvent,
   CultureStatus,
   CultureStore,
   EventType,
+  Eye,
 } from "./types";
 import {
   compactText,
@@ -29,17 +31,45 @@ type Notice = { tone: "success" | "error" | "info"; message: string } | null;
 interface AppState {
   cellLines: CellLine[];
   batches: CultureBatchView[];
-  events: CultureEvent[];
-  auditCount: number;
+  selectedEvents: CultureEvent[];
+  allEvents: CultureEvent[];
   backups: BackupSnapshot[];
   selectedBatchId: number | null;
   search: string;
   statusFilter: CultureStatus | "all";
+  donorFilter: string;
   notice: Notice;
   saving: boolean;
-  initialized: boolean;
   mode: CultureStore["mode"];
 }
+
+interface VesselDraft {
+  culture_name: string;
+  donor_identifier: string | null;
+  eye: Eye;
+  label: string;
+  passage_number: number | null;
+  vessel: string;
+  parent_batch_id: number | null;
+  started_at: string | null;
+  split_date: string | null;
+  media_change_1_date: string | null;
+  media_change_2_date: string | null;
+  status: CultureStatus;
+}
+
+const COMMON_FLASKS = [
+  "T25 flask",
+  "T75 flask",
+  "T150 flask",
+  "T175 flask",
+  "T225 flask",
+  "6-well plate",
+  "12-well plate",
+  "24-well plate",
+  "60 mm dish",
+  "100 mm dish",
+];
 
 const appElement = document.querySelector<HTMLDivElement>("#app");
 
@@ -54,15 +84,15 @@ let store: CultureStore;
 const state: AppState = {
   cellLines: [],
   batches: [],
-  events: [],
-  auditCount: 0,
+  selectedEvents: [],
+  allEvents: [],
   backups: [],
   selectedBatchId: null,
   search: "",
   statusFilter: "all",
+  donorFilter: "all",
   notice: null,
   saving: false,
-  initialized: false,
   mode: "browser-preview",
 };
 
@@ -72,7 +102,6 @@ async function boot(): Promise<void> {
   try {
     store = await createCultureStore();
     state.mode = store.mode;
-    state.initialized = true;
     await refreshData();
   } catch (error) {
     state.notice = {
@@ -86,7 +115,7 @@ async function boot(): Promise<void> {
 async function refreshData(): Promise<void> {
   state.cellLines = await store.listCellLines();
   state.batches = await store.listBatches();
-  state.auditCount = (await store.listAuditEntries(1000)).length;
+  state.allEvents = await store.listEvents();
   state.backups = await store.listBackups();
 
   if (!state.selectedBatchId && state.batches.length > 0) {
@@ -97,7 +126,7 @@ async function refreshData(): Promise<void> {
     state.selectedBatchId = state.batches[0]?.id ?? null;
   }
 
-  state.events = state.selectedBatchId ? await store.listEvents(state.selectedBatchId) : [];
+  state.selectedEvents = state.selectedBatchId ? await store.listEvents(state.selectedBatchId) : [];
   render();
 }
 
@@ -113,21 +142,11 @@ function renderLoading(): void {
 }
 
 function render(): void {
-  const filteredBatches = state.batches.filter((batch) => {
-    const search = state.search.trim().toLowerCase();
-    const matchesSearch =
-      !search ||
-      [batch.label, batch.cell_line_name, batch.species, batch.vessel, batch.medium, batch.incubator_location]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(search));
-    const matchesStatus = state.statusFilter === "all" || batch.status === state.statusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
+  const filteredBatches = getFilteredBatches();
   const selectedBatch = state.batches.find((batch) => batch.id === state.selectedBatchId) ?? null;
-  const activeCount = state.batches.filter((batch) => batch.status === "active").length;
-  const staleCount = state.batches.filter(isStale).length;
   const lastBackup = state.backups[0] ?? null;
+  const donorCount = uniqueValues(state.batches.map((batch) => batch.donor_identifier)).length;
+  const warningCount = state.batches.reduce((total, batch) => total + buildBatchWarnings(batch).length, 0);
 
   app.innerHTML = `
     <div class="app-shell">
@@ -135,14 +154,15 @@ function render(): void {
         <div class="brand">
           <div class="brand-mark"><i data-lucide="microscope"></i></div>
           <div>
-            <strong>Cell Culture</strong>
-            <span>Recorder</span>
+            <strong>Culture Ledger</strong>
+            <span>Donor vessel tracking</span>
           </div>
         </div>
 
         <nav class="nav-stack" aria-label="Primary">
-          <a href="#cultures"><i data-lucide="flask-conical"></i><span>Cultures</span></a>
-          <a href="#record"><i data-lucide="clipboard-plus"></i><span>Record</span></a>
+          <a href="#intake"><i data-lucide="clipboard-plus"></i><span>Intake</span></a>
+          <a href="#lineage"><i data-lucide="git-branch"></i><span>Lineage</span></a>
+          <a href="#records"><i data-lucide="table-2"></i><span>Records</span></a>
           <a href="#backup"><i data-lucide="database-backup"></i><span>Backups</span></a>
         </nav>
 
@@ -159,14 +179,20 @@ function render(): void {
       <main class="main-view">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Native lab records</p>
-            <h1>Cell Culture Recorder</h1>
+            <p class="eyebrow">Fast intake for poorly labelled flasks</p>
+            <h1>Donor Culture Tracker</h1>
           </div>
           <div class="topbar-actions">
             <label class="search-field">
               <i data-lucide="search"></i>
-              <input id="search" type="search" placeholder="Search cultures" value="${escapeHtml(state.search)}" />
+              <input id="search" type="search" placeholder="Search donor, eye, flask, notes" value="${escapeHtml(state.search)}" />
             </label>
+            <select id="donor-filter" aria-label="Filter by donor">
+              <option value="all" ${state.donorFilter === "all" ? "selected" : ""}>All donors</option>
+              ${uniqueValues(state.batches.map((batch) => batch.donor_identifier))
+                .map((donor) => `<option value="${escapeHtml(donor)}" ${state.donorFilter === donor ? "selected" : ""}>${escapeHtml(donor)}</option>`)
+                .join("")}
+            </select>
             <select id="status-filter" aria-label="Filter by status">
               ${statusOption("all", "All statuses")}
               ${statusOption("active", "Active")}
@@ -174,52 +200,64 @@ function render(): void {
               ${statusOption("contaminated", "Contaminated")}
               ${statusOption("discarded", "Discarded")}
             </select>
-            <button id="export-backup" class="button primary" type="button">
+            <button id="download-backup-top" class="button primary" type="button">
               <i data-lucide="download"></i>
-              <span>Export</span>
+              <span>Download backup</span>
             </button>
           </div>
         </header>
 
         ${renderNotice()}
+        ${renderDatalists()}
 
         <section class="stats-grid" aria-label="Overview">
-          ${statCard("Active cultures", activeCount, "flask-conical")}
-          ${statCard("Cell lines", state.cellLines.length, "dna")}
-          ${statCard("Events recorded", state.events.length, "activity")}
-          ${statCard("Stale active cultures", staleCount, "clock-alert")}
+          ${statCard("Donors", donorCount, "scan-text")}
+          ${statCard("Vessels", state.batches.length, "flask-conical")}
+          ${statCard("Active", state.batches.filter((batch) => batch.status === "active").length, "activity")}
+          ${statCard("Warnings", warningCount, "triangle-alert")}
         </section>
 
-        <section id="cultures" class="workspace-grid">
-          <div class="panel culture-panel">
+        <section id="intake" class="intake-grid">
+          ${renderVesselIntakeForm()}
+          ${renderSelectedDetail(selectedBatch)}
+        </section>
+
+        <section id="lineage" class="workspace-grid">
+          <div class="panel lineage-panel">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">Current work</p>
-                <h2>Culture batches</h2>
+                <p class="eyebrow">Tracking tree</p>
+                <h2>Donor culture lineage</h2>
               </div>
               <span class="count-pill">${filteredBatches.length}</span>
             </div>
-            ${renderBatchTable(filteredBatches)}
+            ${renderLineageTree(filteredBatches)}
           </div>
 
           <div class="panel timeline-panel">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">Selected timeline</p>
-                <h2>${selectedBatch ? escapeHtml(selectedBatch.label) : "No culture selected"}</h2>
+                <p class="eyebrow">Selected vessel</p>
+                <h2>${selectedBatch ? escapeHtml(selectedBatch.label) : "No vessel selected"}</h2>
               </div>
             </div>
             ${renderTimeline(selectedBatch)}
           </div>
         </section>
 
-        <section id="record" class="forms-grid">
-          ${renderCellLineForm()}
-          ${renderBatchForm()}
-          ${renderEventForm(selectedBatch)}
+        <section id="records" class="panel culture-panel">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Database</p>
+              <h2>Vessel records</h2>
+            </div>
+            <span class="count-pill">${filteredBatches.length}</span>
+          </div>
+          ${renderBatchTable(filteredBatches)}
         </section>
 
-        <section id="backup" class="backup-section">
+        <section class="forms-grid">
+          ${renderEventForm(selectedBatch)}
           ${renderBackupPanel(lastBackup)}
         </section>
       </main>
@@ -227,6 +265,7 @@ function render(): void {
   `;
 
   attachEvents();
+  updateIntakeWarnings();
   createIcons({ icons });
 }
 
@@ -246,6 +285,28 @@ function renderNotice(): string {
   `;
 }
 
+function renderDatalists(): string {
+  const cultureNames = uniqueValues(state.cellLines.map((line) => line.name));
+  const donors = uniqueValues(state.batches.map((batch) => batch.donor_identifier));
+  const labels = uniqueValues(state.batches.map((batch) => batch.label));
+  const vessels = uniqueValues([...COMMON_FLASKS, ...state.batches.map((batch) => batch.vessel)]);
+  const media = uniqueValues(state.batches.map((batch) => batch.medium));
+  const locations = uniqueValues(state.batches.map((batch) => batch.incubator_location));
+
+  return `
+    ${dataList("culture-name-list", cultureNames)}
+    ${dataList("donor-list", donors)}
+    ${dataList("vessel-label-list", labels)}
+    ${dataList("flask-type-list", vessels)}
+    ${dataList("media-list", media)}
+    ${dataList("location-list", locations)}
+  `;
+}
+
+function dataList(id: string, values: string[]): string {
+  return `<datalist id="${id}">${values.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("")}</datalist>`;
+}
+
 function statCard(label: string, value: number, icon: string): string {
   return `
     <div class="stat-card">
@@ -258,57 +319,235 @@ function statCard(label: string, value: number, icon: string): string {
   `;
 }
 
-function renderBatchTable(batches: CultureBatchView[]): string {
-  if (batches.length === 0) {
+function renderVesselIntakeForm(): string {
+  return `
+    <form id="vessel-form" class="panel form-panel vessel-form">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">New or found vessel</p>
+          <h2>Rapid flask intake</h2>
+        </div>
+        <i data-lucide="clipboard-plus"></i>
+      </div>
+
+      <div class="form-section">
+        <div class="three-col">
+          <label>Donor ID
+            <input name="donor_identifier" list="donor-list" placeholder="6769" />
+          </label>
+          <label>Eye
+            <select name="eye">
+              <option value="OD">OD - right</option>
+              <option value="OS">OS - left</option>
+              <option value="OU">OU - both/pooled</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
+          <label>Culture type
+            <input name="culture_name" list="culture-name-list" value="${escapeHtml(state.cellLines[0]?.name ?? "Corneal endothelial culture")}" />
+          </label>
+        </div>
+
+        <div class="three-col">
+          <label>Vessel label
+            <input name="label" required list="vessel-label-list" placeholder="6769 OD T75" />
+          </label>
+          <label>Passage
+            <input name="passage_number" required type="number" min="0" value="1" />
+          </label>
+          <label>Flask type
+            <input name="vessel" required list="flask-type-list" placeholder="T75 flask" />
+          </label>
+        </div>
+
+        <div class="two-col">
+          <label>Parent vessel
+            <select name="parent_batch_id">
+              <option value="">No known parent</option>
+              ${state.batches.map((batch) => `<option value="${batch.id}">${escapeHtml(vesselOptionLabel(batch))}</option>`).join("")}
+            </select>
+          </label>
+          <label>Status
+            <select name="status">
+              <option value="active">Active</option>
+              <option value="contaminated">Contaminated</option>
+              <option value="frozen">Frozen</option>
+              <option value="discarded">Discarded</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="four-col">
+          <label>Seed date
+            <input name="started_at" required type="date" value="${todayIsoDate()}" />
+          </label>
+          <label>Split date
+            <input name="split_date" type="date" />
+          </label>
+          <label>Media change 1
+            <input name="media_change_1_date" type="date" />
+          </label>
+          <label>Media change 2
+            <input name="media_change_2_date" type="date" />
+          </label>
+        </div>
+
+        <div class="three-col">
+          <label>Medium
+            <input name="medium" list="media-list" placeholder="F99 + 8% FBS" />
+          </label>
+          <label>Seeding density
+            <input name="seeding_density" placeholder="1:3 split, 2.0e5 cells" />
+          </label>
+          <label>Location
+            <input name="incubator_location" list="location-list" placeholder="Incubator 2 / Shelf B" />
+          </label>
+        </div>
+
+        <label>Growth notes
+          <textarea name="growth_notes" rows="4" placeholder="Contaminated, slow growth, confluent, poor notes from flask label"></textarea>
+        </label>
+        <label>Source documentation
+          <textarea name="source_documentation" rows="3" placeholder="Paste the messy source note here for traceability"></textarea>
+        </label>
+      </div>
+
+      <div id="intake-warnings" class="warning-box" aria-live="polite"></div>
+
+      <button class="button primary" type="submit" ${state.saving ? "disabled" : ""}>
+        <i data-lucide="save"></i>
+        <span>Save vessel record</span>
+      </button>
+    </form>
+  `;
+}
+
+function renderSelectedDetail(batch: CultureBatchView | null): string {
+  if (!batch) {
     return `
-      <div class="empty-state">
-        <i data-lucide="flask-conical-off"></i>
-        <p>No cultures match the current filter.</p>
+      <div class="panel detail-panel">
+        <div class="empty-state">
+          <i data-lucide="flask-conical"></i>
+          <p>Select or save a vessel to inspect logic warnings and metadata.</p>
+        </div>
       </div>
     `;
   }
 
+  const warnings = buildBatchWarnings(batch);
+
   return `
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Batch</th>
-            <th>Line</th>
-            <th>Passage</th>
-            <th>Status</th>
-            <th>Last event</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${batches.map(renderBatchRow).join("")}
-        </tbody>
-      </table>
+    <aside class="panel detail-panel">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">${escapeHtml(formatDonorEye(batch))}</p>
+          <h2>${escapeHtml(batch.label)}</h2>
+        </div>
+        ${statusBadge(batch.status)}
+      </div>
+
+      <dl class="detail-grid">
+        <div><dt>Culture</dt><dd>${escapeHtml(batch.cell_line_name)}</dd></div>
+        <div><dt>Passage</dt><dd>P${batch.passage_number}</dd></div>
+        <div><dt>Flask</dt><dd>${escapeHtml(batch.vessel)}</dd></div>
+        <div><dt>Parent</dt><dd>${escapeHtml(batch.parent_label ?? "None recorded")}</dd></div>
+        <div><dt>Seed</dt><dd>${escapeHtml(displayDate(batch.started_at))}</dd></div>
+        <div><dt>Split</dt><dd>${escapeHtml(displayDate(batch.split_date))}</dd></div>
+        <div><dt>Media 1</dt><dd>${escapeHtml(displayDate(batch.media_change_1_date))}</dd></div>
+        <div><dt>Media 2</dt><dd>${escapeHtml(displayDate(batch.media_change_2_date))}</dd></div>
+      </dl>
+
+      ${warnings.length > 0 ? renderWarningList(warnings, "Logic warnings") : `<div class="ok-box"><i data-lucide="circle-check"></i><span>No lineage/date warnings for this vessel.</span></div>`}
+
+      <div class="note-block">
+        <strong>Growth notes</strong>
+        <p>${escapeHtml(batch.growth_notes ?? batch.notes ?? "No notes recorded.")}</p>
+      </div>
+      <div class="note-block">
+        <strong>Source documentation</strong>
+        <p>${escapeHtml(batch.source_documentation ?? "No source text captured.")}</p>
+      </div>
+    </aside>
+  `;
+}
+
+function renderLineageTree(batches: CultureBatchView[]): string {
+  if (batches.length === 0) {
+    return `
+      <div class="empty-state">
+        <i data-lucide="folder-tree"></i>
+        <p>No vessel records match the current filters.</p>
+      </div>
+    `;
+  }
+
+  const groups = groupBatches(batches);
+
+  return `
+    <div class="tree-stack">
+      ${Array.from(groups.entries())
+        .map(([groupName, groupBatches]) => renderTreeGroup(groupName, groupBatches))
+        .join("")}
     </div>
   `;
 }
 
-function renderBatchRow(batch: CultureBatchView): string {
+function renderTreeGroup(groupName: string, batches: CultureBatchView[]): string {
+  const byParent = new Map<number | null, CultureBatchView[]>();
+  const ids = new Set(batches.map((batch) => batch.id));
+  const duplicateCounts = countBy(batches.map((batch) => batch.label.toLowerCase()));
+
+  batches.forEach((batch) => {
+    const parentKey = batch.parent_batch_id && ids.has(batch.parent_batch_id) ? batch.parent_batch_id : null;
+    const list = byParent.get(parentKey) ?? [];
+    list.push(batch);
+    byParent.set(parentKey, list);
+  });
+
+  byParent.forEach((list) => list.sort(compareTreeNodes));
+
   return `
-    <tr class="${batch.id === state.selectedBatchId ? "selected-row" : ""}">
-      <td>
-        <strong>${escapeHtml(batch.label)}</strong>
-        <span>${escapeHtml(batch.vessel)}${batch.incubator_location ? ` / ${escapeHtml(batch.incubator_location)}` : ""}</span>
-      </td>
-      <td>
-        <strong>${escapeHtml(batch.cell_line_name)}</strong>
-        <span>${escapeHtml(batch.species)}</span>
-      </td>
-      <td>P${batch.passage_number}</td>
-      <td>${statusBadge(batch.status)}</td>
-      <td>${escapeHtml(displayDate(batch.last_event_at ?? batch.started_at))}</td>
-      <td>
-        <button class="icon-button select-batch" type="button" data-batch-id="${batch.id}" aria-label="Select ${escapeHtml(batch.label)}">
-          <i data-lucide="arrow-right"></i>
-        </button>
-      </td>
-    </tr>
+    <section class="tree-group">
+      <div class="tree-group-title">
+        <i data-lucide="scan-text"></i>
+        <strong>${escapeHtml(groupName)}</strong>
+      </div>
+      <div class="tree-nodes">
+        ${(byParent.get(null) ?? [])
+          .map((batch) => renderTreeNode(batch, byParent, duplicateCounts, 0))
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderTreeNode(
+  batch: CultureBatchView,
+  byParent: Map<number | null, CultureBatchView[]>,
+  duplicateCounts: Map<string, number>,
+  depth: number,
+): string {
+  const children = byParent.get(batch.id) ?? [];
+  const warnings = buildBatchWarnings(batch);
+  const duplicateCount = duplicateCounts.get(batch.label.toLowerCase()) ?? 0;
+
+  return `
+    <div class="tree-node-wrap">
+      <button class="tree-node ${state.selectedBatchId === batch.id ? "selected" : ""}" type="button" data-batch-id="${batch.id}" style="--depth: ${depth}">
+        <span class="tree-connector"></span>
+        <span class="vessel-chip">${escapeHtml(batch.vessel.replace(" flask", ""))}</span>
+        <span class="tree-main">
+          <strong>${escapeHtml(batch.label)}</strong>
+          <span>${escapeHtml(formatDonorEye(batch))} / P${batch.passage_number} / ${escapeHtml(displayDate(batch.started_at))}</span>
+        </span>
+        ${duplicateCount > 1 ? `<span class="mini-badge">duplicate name</span>` : ""}
+        ${warnings.length > 0 ? `<span class="warning-count">${warnings.length}</span>` : ""}
+        ${statusBadge(batch.status)}
+      </button>
+      ${children.length > 0 ? children.map((child) => renderTreeNode(child, byParent, duplicateCounts, depth + 1)).join("") : ""}
+    </div>
   `;
 }
 
@@ -317,39 +556,41 @@ function renderTimeline(selectedBatch: CultureBatchView | null): string {
     return `
       <div class="empty-state">
         <i data-lucide="list-plus"></i>
-        <p>Create a culture batch to start recording observations.</p>
+        <p>Select a vessel to see recorded events.</p>
       </div>
     `;
   }
 
-  if (state.events.length === 0) {
-    return `
-      <div class="batch-detail">
-        <div>${statusBadge(selectedBatch.status)}</div>
-        <dl>
-          <div><dt>Medium</dt><dd>${escapeHtml(selectedBatch.medium ?? "Not recorded")}</dd></div>
-          <div><dt>Started</dt><dd>${escapeHtml(displayDate(selectedBatch.started_at))}</dd></div>
-        </dl>
-      </div>
-      <div class="empty-state compact">
-        <i data-lucide="clipboard-plus"></i>
-        <p>No events recorded for this batch yet.</p>
-      </div>
-    `;
+  const fixedEvents = inferredEventsForBatch(selectedBatch);
+
+  return `
+    <div class="timeline-summary">
+      ${statusBadge(selectedBatch.status)}
+      <span>${escapeHtml(selectedBatch.medium ?? "No medium recorded")}</span>
+    </div>
+    <ol class="timeline">
+      ${fixedEvents.map(renderFixedEvent).join("")}
+      ${state.selectedEvents.map(renderEvent).join("")}
+      ${fixedEvents.length === 0 && state.selectedEvents.length === 0 ? `<li class="empty-line">No dates or events recorded.</li>` : ""}
+    </ol>
+  `;
+}
+
+function renderFixedEvent(event: { label: string; date: string | null; icon: string }): string {
+  if (!event.date) {
+    return "";
   }
 
   return `
-    <div class="batch-detail">
-      <div>${statusBadge(selectedBatch.status)}</div>
-      <dl>
-        <div><dt>Medium</dt><dd>${escapeHtml(selectedBatch.medium ?? "Not recorded")}</dd></div>
-        <div><dt>Started</dt><dd>${escapeHtml(displayDate(selectedBatch.started_at))}</dd></div>
-        <div><dt>Location</dt><dd>${escapeHtml(selectedBatch.incubator_location ?? "Not recorded")}</dd></div>
-      </dl>
-    </div>
-    <ol class="timeline">
-      ${state.events.map(renderEvent).join("")}
-    </ol>
+    <li>
+      <div class="timeline-icon"><i data-lucide="${event.icon}"></i></div>
+      <div>
+        <div class="timeline-title">
+          <strong>${escapeHtml(event.label)}</strong>
+          <span>${escapeHtml(displayDate(event.date))}</span>
+        </div>
+      </div>
+    </li>
   `;
 }
 
@@ -372,7 +613,7 @@ function renderEvent(event: CultureEvent): string {
           <strong>${formatEventType(event.event_type)}</strong>
           <span>${escapeHtml(displayDate(event.event_at))}</span>
         </div>
-        ${metrics.length > 0 ? `<p class="metrics">${metrics.map(escapeHtml).join(" / ")}</p>` : ""}
+        ${metrics.length > 0 ? `<p class="metrics">${metrics.map((metric) => escapeHtml(metric)).join(" / ")}</p>` : ""}
         ${event.operator ? `<p class="operator">Operator: ${escapeHtml(event.operator)}</p>` : ""}
         <p>${escapeHtml(event.notes || "No notes recorded.")}</p>
       </div>
@@ -380,66 +621,64 @@ function renderEvent(event: CultureEvent): string {
   `;
 }
 
-function renderCellLineForm(): string {
-  return `
-    <form id="cell-line-form" class="panel form-panel">
-      <div class="panel-header">
-        <div>
-          <p class="eyebrow">Reference</p>
-          <h2>New cell line</h2>
-        </div>
-        <i data-lucide="dna"></i>
+function renderBatchTable(batches: CultureBatchView[]): string {
+  if (batches.length === 0) {
+    return `
+      <div class="empty-state">
+        <i data-lucide="flask-conical"></i>
+        <p>No records match the current filters.</p>
       </div>
+    `;
+  }
 
-      <label>Name<input name="name" required placeholder="A549" /></label>
-      <label>Species<input name="species" required placeholder="Human" /></label>
-      <label>Tissue<input name="tissue" placeholder="Lung epithelial" /></label>
-      <label>Source<input name="source" placeholder="ATCC, collaborator, internal" /></label>
-      <label>Identifiers<input name="identifiers" placeholder="Catalog, clone, lot" /></label>
-      <label>Notes<textarea name="notes" rows="3" placeholder="Authentication, morphology, handling notes"></textarea></label>
-
-      <button class="button" type="submit" ${state.saving ? "disabled" : ""}>
-        <i data-lucide="plus"></i>
-        <span>Add cell line</span>
-      </button>
-    </form>
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Vessel</th>
+            <th>Donor</th>
+            <th>Passage</th>
+            <th>Dates</th>
+            <th>Status</th>
+            <th>Warnings</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${batches.map(renderBatchRow).join("")}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
-function renderBatchForm(): string {
-  const disabled = state.cellLines.length === 0 || state.saving;
+function renderBatchRow(batch: CultureBatchView): string {
+  const warnings = buildBatchWarnings(batch);
 
   return `
-    <form id="batch-form" class="panel form-panel">
-      <div class="panel-header">
-        <div>
-          <p class="eyebrow">Culture</p>
-          <h2>Start batch</h2>
-        </div>
-        <i data-lucide="flask-conical"></i>
-      </div>
-
-      <label>Cell line
-        <select name="cell_line_id" required ${state.cellLines.length === 0 ? "disabled" : ""}>
-          ${state.cellLines.map((line) => `<option value="${line.id}">${escapeHtml(line.name)}</option>`).join("")}
-        </select>
-      </label>
-      <label>Batch label<input name="label" required placeholder="A549 P12 6-well A" /></label>
-      <div class="two-col">
-        <label>Passage<input name="passage_number" required type="number" min="0" value="0" /></label>
-        <label>Start date<input name="started_at" required type="date" value="${todayIsoDate()}" /></label>
-      </div>
-      <label>Vessel<input name="vessel" required placeholder="T75 flask, 6-well plate" /></label>
-      <label>Medium<input name="medium" placeholder="DMEM + 10% FBS" /></label>
-      <label>Seeding density<input name="seeding_density" placeholder="2.0e5 cells/well" /></label>
-      <label>Incubator location<input name="incubator_location" placeholder="Incubator 1 / Shelf C" /></label>
-      <label>Notes<textarea name="notes" rows="3" placeholder="Coating, density, special handling"></textarea></label>
-
-      <button class="button" type="submit" ${disabled ? "disabled" : ""}>
-        <i data-lucide="save"></i>
-        <span>Start culture</span>
-      </button>
-    </form>
+    <tr class="${batch.id === state.selectedBatchId ? "selected-row" : ""}">
+      <td>
+        <strong>${escapeHtml(batch.label)}</strong>
+        <span>${escapeHtml(batch.vessel)}${batch.parent_label ? ` / from ${escapeHtml(batch.parent_label)}` : ""}</span>
+      </td>
+      <td>
+        <strong>${escapeHtml(batch.donor_identifier ?? "Unknown donor")}</strong>
+        <span>${escapeHtml(eyeLabel(batch.eye))}</span>
+      </td>
+      <td>P${batch.passage_number}</td>
+      <td>
+        <strong>Seed ${escapeHtml(displayDate(batch.started_at))}</strong>
+        <span>${batch.split_date ? `Split ${escapeHtml(displayDate(batch.split_date))}` : "No split date"}</span>
+      </td>
+      <td>${statusBadge(batch.status)}</td>
+      <td>${warnings.length > 0 ? `<span class="warning-count table-warning">${warnings.length}</span>` : `<span class="muted">0</span>`}</td>
+      <td>
+        <button class="icon-button select-batch" type="button" data-batch-id="${batch.id}" aria-label="Select ${escapeHtml(batch.label)}">
+          <i data-lucide="arrow-right"></i>
+        </button>
+      </td>
+    </tr>
   `;
 }
 
@@ -450,19 +689,19 @@ function renderEventForm(selectedBatch: CultureBatchView | null): string {
     <form id="event-form" class="panel form-panel event-form">
       <div class="panel-header">
         <div>
-          <p class="eyebrow">Daily record</p>
+          <p class="eyebrow">Follow-up</p>
           <h2>Record event</h2>
         </div>
         <i data-lucide="clipboard-plus"></i>
       </div>
 
-      <label>Culture batch
+      <label>Culture vessel
         <select id="selected-batch" name="batch_id" required ${state.batches.length === 0 ? "disabled" : ""}>
           ${state.batches
             .map(
               (batch) =>
                 `<option value="${batch.id}" ${batch.id === selectedBatch?.id ? "selected" : ""}>${escapeHtml(
-                  batch.label,
+                  vesselOptionLabel(batch),
                 )}</option>`,
             )
             .join("")}
@@ -495,7 +734,7 @@ function renderEventForm(selectedBatch: CultureBatchView | null): string {
         <label>Next passage<input name="next_passage_number" type="number" min="0" placeholder="Only if changed" /></label>
       </div>
 
-      <label>Medium<input name="medium" placeholder="RPMI + 10% FBS" /></label>
+      <label>Medium<input name="medium" list="media-list" placeholder="F99 + 8% FBS" /></label>
       <label>Reagent lot<input name="reagent_lot" placeholder="FBS L24018, Trypsin T2304" /></label>
       <label>Operator<input name="operator" placeholder="Initials or name" /></label>
       <label>Status after event
@@ -507,7 +746,7 @@ function renderEventForm(selectedBatch: CultureBatchView | null): string {
           <option value="discarded">Discarded</option>
         </select>
       </label>
-      <label>Notes<textarea name="notes" rows="5" required placeholder="Morphology, color change, contamination signs, action taken"></textarea></label>
+      <label>Notes<textarea name="notes" rows="4" required placeholder="Morphology, color change, contamination signs, action taken"></textarea></label>
 
       <button class="button primary" type="submit" ${disabled ? "disabled" : ""}>
         <i data-lucide="save"></i>
@@ -519,7 +758,7 @@ function renderEventForm(selectedBatch: CultureBatchView | null): string {
 
 function renderBackupPanel(lastBackup: BackupSnapshot | null): string {
   return `
-    <div class="panel backup-panel">
+    <div id="backup" class="panel backup-panel">
       <div class="panel-header">
         <div>
           <p class="eyebrow">Data safety</p>
@@ -528,29 +767,17 @@ function renderBackupPanel(lastBackup: BackupSnapshot | null): string {
         <i data-lucide="database-backup"></i>
       </div>
 
-      <div class="backup-grid">
-        <div>
-          <strong>Current protection</strong>
-          <ul class="safety-list">
-            <li><i data-lucide="check"></i><span>Schema migrations are registered in Rust.</span></li>
-            <li><i data-lucide="check"></i><span>Writes use transaction boundaries.</span></li>
-            <li><i data-lucide="check"></i><span>WAL, foreign keys, busy timeout, and full synchronous writes are enabled.</span></li>
-            <li><i data-lucide="check"></i><span>Every critical write records an audit entry and local snapshot.</span></li>
-          </ul>
-        </div>
-
-        <div class="backup-actions">
-          <p>Last snapshot: ${lastBackup ? escapeHtml(displayDate(lastBackup.created_at)) : "none yet"}</p>
-          <button id="download-backup" class="button primary" type="button">
-            <i data-lucide="download"></i>
-            <span>Download backup</span>
-          </button>
-          <label class="file-button">
-            <i data-lucide="upload"></i>
-            <span>Restore from file</span>
-            <input id="restore-file" type="file" accept="application/json" />
-          </label>
-        </div>
+      <div class="backup-actions">
+        <p>Last snapshot: ${lastBackup ? escapeHtml(displayDate(lastBackup.created_at)) : "none yet"}</p>
+        <button id="download-backup" class="button primary" type="button">
+          <i data-lucide="download"></i>
+          <span>Download backup</span>
+        </button>
+        <label class="file-button">
+          <i data-lucide="upload"></i>
+          <span>Restore from file</span>
+          <input id="restore-file" type="file" accept="application/json" />
+        </label>
       </div>
 
       <div class="snapshot-list">
@@ -577,11 +804,18 @@ function renderSnapshot(snapshot: BackupSnapshot): string {
 }
 
 function attachEvents(): void {
-  app.querySelector<HTMLFormElement>("#cell-line-form")?.addEventListener("submit", handleCellLineSubmit);
-  app.querySelector<HTMLFormElement>("#batch-form")?.addEventListener("submit", handleBatchSubmit);
+  const vesselForm = app.querySelector<HTMLFormElement>("#vessel-form");
+  vesselForm?.addEventListener("submit", handleVesselSubmit);
+  vesselForm?.addEventListener("input", updateIntakeWarnings);
+  vesselForm?.addEventListener("change", updateIntakeWarnings);
+
   app.querySelector<HTMLFormElement>("#event-form")?.addEventListener("submit", handleEventSubmit);
   app.querySelector<HTMLInputElement>("#search")?.addEventListener("input", (event) => {
     state.search = (event.currentTarget as HTMLInputElement).value;
+    render();
+  });
+  app.querySelector<HTMLSelectElement>("#donor-filter")?.addEventListener("change", (event) => {
+    state.donorFilter = (event.currentTarget as HTMLSelectElement).value;
     render();
   });
   app.querySelector<HTMLSelectElement>("#status-filter")?.addEventListener("change", (event) => {
@@ -590,17 +824,17 @@ function attachEvents(): void {
   });
   app.querySelector<HTMLSelectElement>("#selected-batch")?.addEventListener("change", async (event) => {
     state.selectedBatchId = Number((event.currentTarget as HTMLSelectElement).value);
-    state.events = await store.listEvents(state.selectedBatchId);
+    state.selectedEvents = await store.listEvents(state.selectedBatchId);
     render();
   });
-  app.querySelector<HTMLButtonElement>("#export-backup")?.addEventListener("click", downloadBackup);
+  app.querySelector<HTMLButtonElement>("#download-backup-top")?.addEventListener("click", downloadBackup);
   app.querySelector<HTMLButtonElement>("#download-backup")?.addEventListener("click", downloadBackup);
   app.querySelector<HTMLInputElement>("#restore-file")?.addEventListener("change", restoreFromFile);
 
-  app.querySelectorAll<HTMLButtonElement>(".select-batch").forEach((button) => {
+  app.querySelectorAll<HTMLButtonElement>(".select-batch, .tree-node").forEach((button) => {
     button.addEventListener("click", async () => {
       state.selectedBatchId = Number(button.dataset.batchId);
-      state.events = await store.listEvents(state.selectedBatchId);
+      state.selectedEvents = await store.listEvents(state.selectedBatchId);
       render();
     });
   });
@@ -616,42 +850,34 @@ function attachEvents(): void {
   });
 }
 
-async function handleCellLineSubmit(event: SubmitEvent): Promise<void> {
+async function handleVesselSubmit(event: SubmitEvent): Promise<void> {
   event.preventDefault();
   const form = event.currentTarget as HTMLFormElement;
   const data = new FormData(form);
+  const input: CreateVesselInput = {
+    culture_name: requiredText(data.get("culture_name"), "Culture type"),
+    donor_identifier: compactText(data.get("donor_identifier")),
+    eye: (compactText(data.get("eye")) ?? "unknown") as Eye,
+    label: requiredText(data.get("label"), "Vessel label"),
+    passage_number: requiredNumber(data.get("passage_number"), "Passage"),
+    vessel: requiredText(data.get("vessel"), "Flask type"),
+    parent_batch_id: nullableNumber(data.get("parent_batch_id")),
+    started_at: requiredText(data.get("started_at"), "Seed date"),
+    split_date: compactText(data.get("split_date")),
+    media_change_1_date: compactText(data.get("media_change_1_date")),
+    media_change_2_date: compactText(data.get("media_change_2_date")),
+    medium: compactText(data.get("medium")),
+    seeding_density: compactText(data.get("seeding_density")),
+    incubator_location: compactText(data.get("incubator_location")),
+    status: (compactText(data.get("status")) ?? "active") as CultureStatus,
+    growth_notes: compactText(data.get("growth_notes")),
+    source_documentation: compactText(data.get("source_documentation")),
+  };
 
-  await runMutation("Cell line saved.", async () => {
-    await store.createCellLine({
-      name: requiredText(data.get("name"), "Name"),
-      species: requiredText(data.get("species"), "Species"),
-      tissue: compactText(data.get("tissue")),
-      source: compactText(data.get("source")),
-      identifiers: compactText(data.get("identifiers")),
-      notes: compactText(data.get("notes")),
-    });
+  await runMutation("Vessel record saved.", async () => {
+    const id = await store.createVessel(input);
     form.reset();
-  });
-}
-
-async function handleBatchSubmit(event: SubmitEvent): Promise<void> {
-  event.preventDefault();
-  const form = event.currentTarget as HTMLFormElement;
-  const data = new FormData(form);
-
-  await runMutation("Culture batch started.", async () => {
-    await store.createBatch({
-      cell_line_id: requiredNumber(data.get("cell_line_id"), "Cell line"),
-      label: requiredText(data.get("label"), "Batch label"),
-      passage_number: requiredNumber(data.get("passage_number"), "Passage"),
-      vessel: requiredText(data.get("vessel"), "Vessel"),
-      medium: compactText(data.get("medium")),
-      seeding_density: compactText(data.get("seeding_density")),
-      incubator_location: compactText(data.get("incubator_location")),
-      started_at: requiredText(data.get("started_at"), "Start date"),
-      notes: compactText(data.get("notes")),
-    });
-    form.reset();
+    state.selectedBatchId = id;
   });
 }
 
@@ -663,7 +889,7 @@ async function handleEventSubmit(event: SubmitEvent): Promise<void> {
   const viability = boundedPercent(data.get("viability_percent"), "Viability");
   const nextStatus = compactText(data.get("next_status")) as CultureStatus | null;
   const input: CreateEventInput = {
-    batch_id: requiredNumber(data.get("batch_id"), "Culture batch"),
+    batch_id: requiredNumber(data.get("batch_id"), "Culture vessel"),
     event_type: requiredText(data.get("event_type"), "Event type") as EventType,
     event_at: requiredText(data.get("event_at"), "Date and time"),
     confluence_percent: confluence,
@@ -685,9 +911,9 @@ async function handleEventSubmit(event: SubmitEvent): Promise<void> {
 }
 
 async function downloadBackup(): Promise<void> {
-  await runMutation("Backup exported.", async () => {
+  await runMutation("Backup downloaded.", async () => {
     const pkg = await store.exportBackup("Manual export");
-    const filename = `cell-culture-backup-${pkg.exportedAt.slice(0, 10)}.json`;
+    const filename = `donor-culture-backup-${pkg.exportedAt.slice(0, 10)}.json`;
     downloadJson(filename, JSON.stringify(pkg, null, 2));
   });
 }
@@ -707,7 +933,7 @@ async function restoreFromFile(event: Event): Promise<void> {
 
 async function restorePackage(pkg: BackupPackage): Promise<void> {
   const approved = window.confirm(
-    "Restore this backup? Current cell lines, culture batches, and events will be replaced after an automatic snapshot is saved.",
+    "Restore this backup? Current donor culture vessels and events will be replaced after an automatic snapshot is saved.",
   );
   if (!approved) {
     return;
@@ -739,30 +965,241 @@ async function runMutation(successMessage: string, action: () => Promise<void>):
   }
 }
 
-function boundedPercent(value: FormDataEntryValue | null, label: string): number | null {
-  const parsed = nullableNumber(value);
-  if (parsed === null) {
-    return null;
+function updateIntakeWarnings(): void {
+  const form = app.querySelector<HTMLFormElement>("#vessel-form");
+  const target = app.querySelector<HTMLDivElement>("#intake-warnings");
+  if (!form || !target) {
+    return;
   }
 
-  if (parsed < 0 || parsed > 100) {
-    throw new Error(`${label} must be between 0 and 100.`);
-  }
-
-  return parsed;
+  const warnings = buildDraftWarnings(readVesselDraft(form));
+  target.innerHTML =
+    warnings.length > 0
+      ? renderWarningList(warnings, "Check before saving")
+      : `<div class="ok-box"><i data-lucide="circle-check"></i><span>No logic warnings for the current entry.</span></div>`;
+  createIcons({ icons });
 }
 
-function isStale(batch: CultureBatchView): boolean {
-  if (batch.status !== "active") {
-    return false;
+function readVesselDraft(form: HTMLFormElement): VesselDraft {
+  const data = new FormData(form);
+  return {
+    culture_name: compactText(data.get("culture_name")) ?? "",
+    donor_identifier: compactText(data.get("donor_identifier")),
+    eye: (compactText(data.get("eye")) ?? "unknown") as Eye,
+    label: compactText(data.get("label")) ?? "",
+    passage_number: nullableNumber(data.get("passage_number")),
+    vessel: compactText(data.get("vessel")) ?? "",
+    parent_batch_id: nullableNumber(data.get("parent_batch_id")),
+    started_at: compactText(data.get("started_at")),
+    split_date: compactText(data.get("split_date")),
+    media_change_1_date: compactText(data.get("media_change_1_date")),
+    media_change_2_date: compactText(data.get("media_change_2_date")),
+    status: (compactText(data.get("status")) ?? "active") as CultureStatus,
+  };
+}
+
+function buildBatchWarnings(batch: CultureBatchView): string[] {
+  return buildDraftWarnings(
+    {
+      culture_name: batch.cell_line_name,
+      donor_identifier: batch.donor_identifier,
+      eye: batch.eye ?? "unknown",
+      label: batch.label,
+      passage_number: batch.passage_number,
+      vessel: batch.vessel,
+      parent_batch_id: batch.parent_batch_id,
+      started_at: batch.started_at,
+      split_date: batch.split_date,
+      media_change_1_date: batch.media_change_1_date,
+      media_change_2_date: batch.media_change_2_date,
+      status: batch.status,
+    },
+    batch.id,
+  );
+}
+
+function buildDraftWarnings(draft: VesselDraft, ignoreBatchId?: number): string[] {
+  const warnings: string[] = [];
+  const label = draft.label.trim().toLowerCase();
+  const donor = draft.donor_identifier?.trim().toLowerCase() ?? "";
+  const peers = state.batches.filter((batch) => batch.id !== ignoreBatchId);
+
+  if (!draft.donor_identifier) {
+    warnings.push("No donor ID entered; the vessel will be grouped under unknown donor.");
   }
 
-  const last = new Date(batch.last_event_at ?? batch.started_at);
-  if (Number.isNaN(last.getTime())) {
-    return false;
+  if (label) {
+    const duplicates = peers.filter((batch) => batch.label.trim().toLowerCase() === label);
+    if (duplicates.length > 0) {
+      warnings.push(
+        `Duplicate vessel label found (${duplicates
+          .map((batch) => `${formatDonorEye(batch)} P${batch.passage_number}`)
+          .join(", ")}). This is allowed, but verify this is a distinct flask.`,
+      );
+    }
   }
 
-  return Date.now() - last.getTime() > 3 * 24 * 60 * 60 * 1000;
+  const parent = draft.parent_batch_id
+    ? state.batches.find((batch) => batch.id === draft.parent_batch_id && batch.id !== ignoreBatchId)
+    : null;
+
+  if (parent) {
+    if (draft.passage_number !== null && draft.passage_number <= parent.passage_number) {
+      warnings.push(`Selected parent is P${parent.passage_number}; child passage should usually be higher.`);
+    }
+    if (draft.started_at && dateMs(draft.started_at) < dateMs(parent.started_at)) {
+      warnings.push("Seed date is before the selected parent vessel seed date.");
+    }
+    if (draft.donor_identifier && parent.donor_identifier && donor !== parent.donor_identifier.toLowerCase()) {
+      warnings.push(`Selected parent donor (${parent.donor_identifier}) does not match this donor.`);
+    }
+    if (draft.eye !== "unknown" && parent.eye && parent.eye !== "unknown" && draft.eye !== parent.eye) {
+      warnings.push(`Selected parent eye (${eyeLabel(parent.eye)}) does not match this eye.`);
+    }
+  }
+
+  if (draft.started_at && draft.split_date && dateMs(draft.split_date) < dateMs(draft.started_at)) {
+    warnings.push("Split date is before seed date.");
+  }
+
+  for (const field of [
+    ["media change 1", draft.media_change_1_date],
+    ["media change 2", draft.media_change_2_date],
+  ] as const) {
+    if (draft.started_at && field[1] && dateMs(field[1]) < dateMs(draft.started_at)) {
+      warnings.push(`${field[0]} is before seed date.`);
+    }
+  }
+
+  if (draft.media_change_1_date && draft.media_change_2_date && dateMs(draft.media_change_2_date) < dateMs(draft.media_change_1_date)) {
+    warnings.push("Media change 2 is before media change 1.");
+  }
+
+  if (draft.donor_identifier && draft.passage_number !== null && draft.started_at) {
+    const draftPassage = draft.passage_number;
+    const donorPeers = peers.filter(
+      (batch) =>
+        (batch.donor_identifier ?? "").toLowerCase() === donor &&
+        (batch.eye ?? "unknown") === draft.eye,
+    );
+
+    donorPeers.forEach((batch) => {
+      const batchDate = dateMs(batch.started_at);
+      const draftDate = dateMs(draft.started_at);
+      if (batch.passage_number < draftPassage && batchDate > draftDate) {
+        warnings.push(
+          `P${draftPassage} date is before existing P${batch.passage_number} vessel "${batch.label}".`,
+        );
+      }
+      if (batch.passage_number > draftPassage && batchDate < draftDate) {
+        warnings.push(
+          `Existing P${batch.passage_number} vessel "${batch.label}" is dated before this lower passage.`,
+        );
+      }
+    });
+  }
+
+  return warnings;
+}
+
+function renderWarningList(warnings: string[], title: string): string {
+  return `
+    <div class="warning-list">
+      <strong><i data-lucide="triangle-alert"></i>${escapeHtml(title)}</strong>
+      <ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>
+    </div>
+  `;
+}
+
+function getFilteredBatches(): CultureBatchView[] {
+  const search = state.search.trim().toLowerCase();
+
+  return state.batches.filter((batch) => {
+    const matchesSearch =
+      !search ||
+      [
+        batch.label,
+        batch.donor_identifier,
+        batch.eye,
+        batch.vessel,
+        batch.medium,
+        batch.incubator_location,
+        batch.growth_notes,
+        batch.source_documentation,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(search));
+    const matchesStatus = state.statusFilter === "all" || batch.status === state.statusFilter;
+    const matchesDonor = state.donorFilter === "all" || batch.donor_identifier === state.donorFilter;
+
+    return matchesSearch && matchesStatus && matchesDonor;
+  });
+}
+
+function groupBatches(batches: CultureBatchView[]): Map<string, CultureBatchView[]> {
+  const groups = new Map<string, CultureBatchView[]>();
+  batches.forEach((batch) => {
+    const key = formatDonorEye(batch);
+    const group = groups.get(key) ?? [];
+    group.push(batch);
+    groups.set(key, group);
+  });
+  groups.forEach((group) => group.sort(compareTreeNodes));
+  return groups;
+}
+
+function uniqueValues(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value))).sort(
+    (a, b) => a.localeCompare(b),
+  );
+}
+
+function countBy(values: string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  values.forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
+  return counts;
+}
+
+function compareTreeNodes(a: CultureBatchView, b: CultureBatchView): number {
+  return a.passage_number - b.passage_number || dateMs(a.started_at) - dateMs(b.started_at) || a.id - b.id;
+}
+
+function inferredEventsForBatch(batch: CultureBatchView): Array<{ label: string; date: string | null; icon: string }> {
+  return [
+    { label: "Seeded", date: batch.started_at, icon: "sprout" },
+    { label: "Split", date: batch.split_date, icon: "split" },
+    { label: "Media change 1", date: batch.media_change_1_date, icon: "refresh-cw" },
+    { label: "Media change 2", date: batch.media_change_2_date, icon: "refresh-cw" },
+  ].filter((event) => event.date);
+}
+
+function vesselOptionLabel(batch: CultureBatchView): string {
+  return `${batch.donor_identifier ?? "Unknown"} ${eyeLabel(batch.eye)} / ${batch.label} / P${batch.passage_number} / ${batch.vessel}`;
+}
+
+function formatDonorEye(batch: Pick<CultureBatchView, "donor_identifier" | "eye">): string {
+  return `${batch.donor_identifier ?? "Unknown donor"} ${eyeLabel(batch.eye)}`;
+}
+
+function eyeLabel(eye: Eye | null | undefined): string {
+  if (eye === "OD") {
+    return "OD";
+  }
+  if (eye === "OS") {
+    return "OS";
+  }
+  if (eye === "OU") {
+    return "OU";
+  }
+  return "unknown eye";
+}
+
+function dateMs(value: string | null | undefined): number {
+  if (!value) {
+    return Number.NaN;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? Number.NaN : parsed.getTime();
 }
 
 function statusOption(value: AppState["statusFilter"], label: string): string {
@@ -793,6 +1230,19 @@ function eventIcon(type: EventType): string {
   };
 
   return iconsByType[type];
+}
+
+function boundedPercent(value: FormDataEntryValue | null, label: string): number | null {
+  const parsed = nullableNumber(value);
+  if (parsed === null) {
+    return null;
+  }
+
+  if (parsed < 0 || parsed > 100) {
+    throw new Error(`${label} must be between 0 and 100.`);
+  }
+
+  return parsed;
 }
 
 void boot();
