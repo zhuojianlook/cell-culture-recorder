@@ -283,9 +283,11 @@ function render(): void {
                 <p class="eyebrow">Tracking tree</p>
                 <h2>Donor culture lineage</h2>
               </div>
-              <span class="count-pill">${filteredBatches.length}</span>
+              <span id="lineage-count" class="count-pill">${filteredBatches.length}</span>
             </div>
-            ${renderLineageTree(filteredBatches)}
+            <div id="lineage-results">
+              ${renderLineageTree(filteredBatches)}
+            </div>
           </div>
 
           <div class="panel timeline-panel">
@@ -305,9 +307,11 @@ function render(): void {
               <p class="eyebrow">Database</p>
               <h2>Vessel records</h2>
             </div>
-            <span class="count-pill">${filteredBatches.length}</span>
+            <span id="records-count" class="count-pill">${filteredBatches.length}</span>
           </div>
-          ${renderBatchTable(filteredBatches)}
+          <div id="records-results">
+            ${renderBatchTable(filteredBatches)}
+          </div>
         </section>
 
         <section class="forms-grid">
@@ -931,15 +935,15 @@ function attachEvents(): void {
   app.querySelector<HTMLFormElement>("#event-form")?.addEventListener("submit", handleEventSubmit);
   app.querySelector<HTMLInputElement>("#search")?.addEventListener("input", (event) => {
     state.search = (event.currentTarget as HTMLInputElement).value;
-    render();
+    updateFilteredViews();
   });
   app.querySelector<HTMLSelectElement>("#donor-filter")?.addEventListener("change", (event) => {
     state.donorFilter = (event.currentTarget as HTMLSelectElement).value;
-    render();
+    updateFilteredViews();
   });
   app.querySelector<HTMLSelectElement>("#status-filter")?.addEventListener("change", (event) => {
     state.statusFilter = (event.currentTarget as HTMLSelectElement).value as AppState["statusFilter"];
-    render();
+    updateFilteredViews();
   });
   app.querySelector<HTMLSelectElement>("#selected-batch")?.addEventListener("change", async (event) => {
     state.selectedBatchId = Number((event.currentTarget as HTMLSelectElement).value);
@@ -954,13 +958,7 @@ function attachEvents(): void {
   app.querySelector<HTMLButtonElement>("#check-updates")?.addEventListener("click", checkForUpdates);
   app.querySelector<HTMLInputElement>("#restore-file")?.addEventListener("change", restoreFromFile);
 
-  app.querySelectorAll<HTMLButtonElement>(".select-batch, .tree-node").forEach((button) => {
-    button.addEventListener("click", async () => {
-      state.selectedBatchId = Number(button.dataset.batchId);
-      state.selectedEvents = await store.listEvents(state.selectedBatchId);
-      render();
-    });
-  });
+  attachBatchSelectionEvents();
 
   app.querySelectorAll<HTMLButtonElement>(".restore-snapshot").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -969,6 +967,40 @@ function attachEvents(): void {
         return;
       }
       await restorePackage(JSON.parse(snapshot.exported_json) as BackupPackage);
+    });
+  });
+}
+
+function updateFilteredViews(): void {
+  const filteredBatches = getFilteredBatches();
+  const lineageCount = app.querySelector<HTMLSpanElement>("#lineage-count");
+  const recordsCount = app.querySelector<HTMLSpanElement>("#records-count");
+  const lineageResults = app.querySelector<HTMLDivElement>("#lineage-results");
+  const recordsResults = app.querySelector<HTMLDivElement>("#records-results");
+
+  if (lineageCount) {
+    lineageCount.textContent = String(filteredBatches.length);
+  }
+  if (recordsCount) {
+    recordsCount.textContent = String(filteredBatches.length);
+  }
+  if (lineageResults) {
+    lineageResults.innerHTML = renderLineageTree(filteredBatches);
+  }
+  if (recordsResults) {
+    recordsResults.innerHTML = renderBatchTable(filteredBatches);
+  }
+
+  attachBatchSelectionEvents();
+  createIcons({ icons });
+}
+
+function attachBatchSelectionEvents(): void {
+  app.querySelectorAll<HTMLButtonElement>(".select-batch, .tree-node").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.selectedBatchId = Number(button.dataset.batchId);
+      state.selectedEvents = await store.listEvents(state.selectedBatchId);
+      render();
     });
   });
 }
