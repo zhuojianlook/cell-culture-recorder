@@ -1,4 +1,5 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import { createIcons, icons } from "lucide";
 import "./styles.css";
 import { createCultureStore } from "./store";
@@ -30,8 +31,6 @@ import {
   todayIsoDate,
 } from "./utils";
 
-const GITHUB_RELEASES_URL = "https://github.com/zhuojianlook/cell-culture-recorder/releases";
-
 type Notice = { tone: "success" | "error" | "info"; message: string } | null;
 
 interface AppState {
@@ -61,6 +60,7 @@ interface VesselDraft {
   split_date: string | null;
   media_change_1_date: string | null;
   media_change_2_date: string | null;
+  media_changes: MediaChangeDraft[];
   source_record_type: SourceRecordType;
   raw_source_identifier: string | null;
   pretreatment_date: string | null;
@@ -69,6 +69,11 @@ interface VesselDraft {
   ground_truth_date: string | null;
   conflict_resolution: string | null;
   status: CultureStatus;
+}
+
+interface MediaChangeDraft {
+  date: string | null;
+  medium: string | null;
 }
 
 interface GroundTruthSource {
@@ -102,8 +107,6 @@ const RAW_INTAKE_FIELDS = [
   "status",
   "started_at",
   "split_date",
-  "media_change_1_date",
-  "media_change_2_date",
   "source_record_type",
   "raw_source_identifier",
   "pretreatment_date",
@@ -112,7 +115,6 @@ const RAW_INTAKE_FIELDS = [
   "conflict_resolution",
   "medium",
   "seeding_density",
-  "incubator_location",
   "growth_notes",
   "source_documentation",
 ];
@@ -349,7 +351,6 @@ function renderDatalists(): string {
   const labels = uniqueValues(state.batches.map((batch) => batch.label));
   const vessels = uniqueValues([...COMMON_FLASKS, ...state.batches.map((batch) => batch.vessel)]);
   const media = uniqueValues(state.batches.map((batch) => batch.medium));
-  const locations = uniqueValues(state.batches.map((batch) => batch.incubator_location));
 
   return `
     ${dataList("culture-name-list", cultureNames)}
@@ -357,7 +358,6 @@ function renderDatalists(): string {
     ${dataList("vessel-label-list", labels)}
     ${dataList("flask-type-list", vessels)}
     ${dataList("media-list", media)}
-    ${dataList("location-list", locations)}
   `;
 }
 
@@ -480,30 +480,38 @@ function renderVesselIntakeForm(): string {
       </div>
 
       <div class="form-section">
-        <div class="four-col">
+        <div class="two-col">
           <label>Seed date
             <input name="started_at" required type="date" value="${todayIsoDate()}" />
           </label>
           <label>Split date
             <input name="split_date" type="date" />
           </label>
-          <label>Media change 1
-            <input name="media_change_1_date" type="date" />
-          </label>
-          <label>Media change 2
-            <input name="media_change_2_date" type="date" />
-          </label>
         </div>
 
-        <div class="three-col">
-          <label>Medium
+        <div class="media-change-editor">
+          <div class="section-title compact">
+            <i data-lucide="refresh-cw"></i>
+            <div>
+              <strong>Media changes</strong>
+              <span>Add as many dated media changes as needed, each with its media type.</span>
+            </div>
+          </div>
+          <div id="media-change-rows" class="media-change-rows">
+            ${renderMediaChangeInputRow(0)}
+          </div>
+          <button id="add-media-change" class="button subtle" type="button">
+            <i data-lucide="plus"></i>
+            <span>Add media change</span>
+          </button>
+        </div>
+
+        <div class="two-col">
+          <label>Baseline media type
             <input name="medium" list="media-list" placeholder="F99 + 8% FBS" />
           </label>
           <label>Seeding density
             <input name="seeding_density" placeholder="1:3 split, 2.0e5 cells" />
-          </label>
-          <label>Location
-            <input name="incubator_location" list="location-list" placeholder="Incubator 2 / Shelf B" />
           </label>
         </div>
 
@@ -522,6 +530,22 @@ function renderVesselIntakeForm(): string {
         <span>Save vessel record</span>
       </button>
     </form>
+  `;
+}
+
+function renderMediaChangeInputRow(index: number): string {
+  return `
+    <div class="media-change-row" data-media-change-row>
+      <label>Media change date
+        <input name="media_change_date" type="date" />
+      </label>
+      <label>Media type
+        <input name="media_change_medium" list="media-list" placeholder="F99 + 8% FBS" />
+      </label>
+      <button class="icon-button remove-media-change" type="button" aria-label="Remove media change ${index + 1}">
+        <i data-lucide="x"></i>
+      </button>
+    </div>
   `;
 }
 
@@ -554,10 +578,10 @@ function renderSelectedDetail(batch: CultureBatchView | null): string {
         <div><dt>Passage</dt><dd>P${batch.passage_number}</dd></div>
         <div><dt>Flask</dt><dd>${escapeHtml(batch.vessel)}</dd></div>
         <div><dt>Parent</dt><dd>${escapeHtml(batch.parent_label ?? "None recorded")}</dd></div>
+        <div><dt>Media type</dt><dd>${escapeHtml(batch.medium ?? "Not recorded")}</dd></div>
+        <div><dt>Seeding density</dt><dd>${escapeHtml(batch.seeding_density ?? "Not recorded")}</dd></div>
         <div><dt>Seed</dt><dd>${escapeHtml(displayDate(batch.started_at))}</dd></div>
         <div><dt>Split</dt><dd>${escapeHtml(displayDate(batch.split_date))}</dd></div>
-        <div><dt>Media 1</dt><dd>${escapeHtml(displayDate(batch.media_change_1_date))}</dd></div>
-        <div><dt>Media 2</dt><dd>${escapeHtml(displayDate(batch.media_change_2_date))}</dd></div>
         <div><dt>Source type</dt><dd>${escapeHtml(sourceRecordLabel(batch.source_record_type))}</dd></div>
         <div><dt>Raw source ID</dt><dd>${escapeHtml(batch.raw_source_identifier ?? "Not captured")}</dd></div>
         <div><dt>Pretreatment</dt><dd>${escapeHtml(displayDate(batch.pretreatment_date))}</dd></div>
@@ -681,7 +705,7 @@ function renderTimeline(selectedBatch: CultureBatchView | null): string {
   return `
     <div class="timeline-summary">
       ${statusBadge(selectedBatch.status)}
-      <span>${escapeHtml(selectedBatch.medium ?? "No medium recorded")}</span>
+      <span>${escapeHtml(selectedBatch.medium ?? "No baseline media type recorded")}</span>
     </div>
     <ol class="timeline">
       ${fixedEvents.map(renderFixedEvent).join("")}
@@ -714,7 +738,7 @@ function renderEvent(event: CultureEvent): string {
     event.confluence_percent !== null ? `${event.confluence_percent}% confluence` : null,
     event.viability_percent !== null ? `${event.viability_percent}% viability` : null,
     event.split_ratio ? `Split ${event.split_ratio}` : null,
-    event.medium ? `Medium ${event.medium}` : null,
+    event.medium ? `Media ${event.medium}` : null,
     event.reagent_lot ? `Lot ${event.reagent_lot}` : null,
   ].filter(Boolean);
 
@@ -849,7 +873,7 @@ function renderEventForm(selectedBatch: CultureBatchView | null): string {
         <label>Next passage<input name="next_passage_number" type="number" min="0" placeholder="Only if changed" /></label>
       </div>
 
-      <label>Medium<input name="medium" list="media-list" placeholder="F99 + 8% FBS" /></label>
+      <label>Media type<input name="medium" list="media-list" placeholder="F99 + 8% FBS" /></label>
       <label>Reagent lot<input name="reagent_lot" placeholder="FBS L24018, Trypsin T2304" /></label>
       <label>Operator<input name="operator" placeholder="Initials or name" /></label>
       <label>Status after event
@@ -931,6 +955,8 @@ function attachEvents(): void {
   vesselForm?.addEventListener("submit", handleVesselSubmit);
   vesselForm?.addEventListener("input", updateIntakeWarnings);
   vesselForm?.addEventListener("change", updateIntakeWarnings);
+  app.querySelector<HTMLButtonElement>("#add-media-change")?.addEventListener("click", addMediaChangeRow);
+  attachMediaChangeRemoveEvents();
 
   app.querySelector<HTMLFormElement>("#event-form")?.addEventListener("submit", handleEventSubmit);
   app.querySelector<HTMLInputElement>("#search")?.addEventListener("input", (event) => {
@@ -1005,44 +1031,104 @@ function attachBatchSelectionEvents(): void {
   });
 }
 
+function addMediaChangeRow(): void {
+  const rows = app.querySelector<HTMLDivElement>("#media-change-rows");
+  if (!rows) {
+    return;
+  }
+
+  rows.insertAdjacentHTML("beforeend", renderMediaChangeInputRow(rows.querySelectorAll("[data-media-change-row]").length));
+  attachMediaChangeRemoveEvents();
+  updateIntakeWarnings();
+  createIcons({ icons });
+}
+
+function attachMediaChangeRemoveEvents(): void {
+  app.querySelectorAll<HTMLButtonElement>(".remove-media-change").forEach((button) => {
+    if (button.dataset.bound === "true") {
+      return;
+    }
+    button.dataset.bound = "true";
+    button.addEventListener("click", () => {
+      button.closest("[data-media-change-row]")?.remove();
+      updateIntakeWarnings();
+    });
+  });
+}
+
 async function handleVesselSubmit(event: SubmitEvent): Promise<void> {
   event.preventDefault();
   const form = event.currentTarget as HTMLFormElement;
-  const data = new FormData(form);
-  const input: CreateVesselInput = {
-    culture_name: requiredText(data.get("culture_name"), "Culture type"),
-    donor_identifier: compactText(data.get("donor_identifier")),
-    eye: (compactText(data.get("eye")) ?? "unknown") as Eye,
-    label: requiredText(data.get("label"), "Vessel label"),
-    passage_number: requiredNumber(data.get("passage_number"), "Passage"),
-    vessel: requiredText(data.get("vessel"), "Flask type"),
-    parent_batch_id: nullableNumber(data.get("parent_batch_id")),
-    started_at: requiredText(data.get("started_at"), "Seed date"),
-    split_date: compactText(data.get("split_date")),
-    media_change_1_date: compactText(data.get("media_change_1_date")),
-    media_change_2_date: compactText(data.get("media_change_2_date")),
-    source_record_type: (compactText(data.get("source_record_type")) ?? "culture_vessel") as SourceRecordType,
-    raw_source_identifier: compactText(data.get("raw_source_identifier")),
-    pretreatment_date: compactText(data.get("pretreatment_date")),
-    dissociation_date: compactText(data.get("dissociation_date")),
-    ground_truth_date_field: (compactText(data.get("ground_truth_date_field")) ?? "seed_date") as GroundTruthDateField,
-    ground_truth_date: null,
-    conflict_resolution: compactText(data.get("conflict_resolution")),
-    raw_intake_json: buildRawIntakeJson(data),
-    medium: compactText(data.get("medium")),
-    seeding_density: compactText(data.get("seeding_density")),
-    incubator_location: compactText(data.get("incubator_location")),
-    status: (compactText(data.get("status")) ?? "active") as CultureStatus,
-    growth_notes: compactText(data.get("growth_notes")),
-    source_documentation: compactText(data.get("source_documentation")),
-  };
-  input.ground_truth_date = groundTruthDate(input);
+  try {
+    const data = new FormData(form);
+    const mediaChanges = readMediaChanges(data);
 
-  await runMutation("Vessel record saved.", async () => {
-    const id = await store.createVessel(input);
-    form.reset();
-    state.selectedBatchId = id;
-  });
+    mediaChanges.forEach((change, index) => {
+      if (!change.date || !change.medium) {
+        throw new Error(`Media change ${index + 1} needs both a date and a media type.`);
+      }
+    });
+
+    const input: CreateVesselInput = {
+      culture_name: requiredText(data.get("culture_name"), "Culture type"),
+      donor_identifier: compactText(data.get("donor_identifier")),
+      eye: (compactText(data.get("eye")) ?? "unknown") as Eye,
+      label: requiredText(data.get("label"), "Vessel label"),
+      passage_number: requiredNumber(data.get("passage_number"), "Passage"),
+      vessel: requiredText(data.get("vessel"), "Flask type"),
+      parent_batch_id: nullableNumber(data.get("parent_batch_id")),
+      started_at: requiredText(data.get("started_at"), "Seed date"),
+      split_date: compactText(data.get("split_date")),
+      media_change_1_date: null,
+      media_change_2_date: null,
+      source_record_type: (compactText(data.get("source_record_type")) ?? "culture_vessel") as SourceRecordType,
+      raw_source_identifier: compactText(data.get("raw_source_identifier")),
+      pretreatment_date: compactText(data.get("pretreatment_date")),
+      dissociation_date: compactText(data.get("dissociation_date")),
+      ground_truth_date_field: (compactText(data.get("ground_truth_date_field")) ?? "seed_date") as GroundTruthDateField,
+      ground_truth_date: null,
+      conflict_resolution: compactText(data.get("conflict_resolution")),
+      raw_intake_json: buildRawIntakeJson(data),
+      medium: compactText(data.get("medium")),
+      seeding_density: compactText(data.get("seeding_density")),
+      incubator_location: null,
+      status: (compactText(data.get("status")) ?? "active") as CultureStatus,
+      growth_notes: compactText(data.get("growth_notes")),
+      source_documentation: compactText(data.get("source_documentation")),
+    };
+    input.ground_truth_date = groundTruthDate(input);
+
+    await runMutation("Vessel record saved.", async () => {
+      const id = await store.createVessel(input);
+      for (const change of mediaChanges) {
+        if (!change.date || !change.medium) {
+          continue;
+        }
+        await store.recordEvent({
+          batch_id: id,
+          event_type: "media_change",
+          event_at: change.date,
+          confluence_percent: null,
+          viability_percent: null,
+          split_ratio: null,
+          medium: change.medium,
+          reagent_lot: null,
+          operator: null,
+          notes: "Media change entered during vessel intake.",
+          next_status: null,
+          next_passage_number: null,
+        });
+      }
+      form.reset();
+      state.selectedBatchId = id;
+    });
+  } catch (error) {
+    state.notice = {
+      tone: "error",
+      message: error instanceof Error ? error.message : "The vessel entry is incomplete.",
+    };
+    render();
+  }
 }
 
 async function handleEventSubmit(event: SubmitEvent): Promise<void> {
@@ -1101,8 +1187,8 @@ async function exportExcel(): Promise<void> {
         parent_vessel: batch.parent_label,
         seed_date: batch.started_at,
         split_date: batch.split_date,
-        media_change_1_date: batch.media_change_1_date,
-        media_change_2_date: batch.media_change_2_date,
+        legacy_media_change_1_date: batch.media_change_1_date,
+        legacy_media_change_2_date: batch.media_change_2_date,
         source_record_type: sourceRecordLabel(batch.source_record_type),
         raw_source_identifier: batch.raw_source_identifier,
         pretreatment_date: batch.pretreatment_date,
@@ -1110,9 +1196,8 @@ async function exportExcel(): Promise<void> {
         ground_truth_date_field: groundTruthLabel(batch.ground_truth_date_field),
         ground_truth_date: batch.ground_truth_date,
         conflict_resolution: batch.conflict_resolution,
-        medium: batch.medium,
+        baseline_media_type: batch.medium,
         seeding_density: batch.seeding_density,
-        location: batch.incubator_location,
         growth_notes: batch.growth_notes,
         source_documentation: batch.source_documentation,
         warnings: buildBatchWarnings(batch).join(" | "),
@@ -1134,7 +1219,7 @@ async function exportExcel(): Promise<void> {
           confluence_percent: event.confluence_percent,
           viability_percent: event.viability_percent,
           split_ratio: event.split_ratio,
-          medium: event.medium,
+          media_type: event.medium,
           reagent_lot: event.reagent_lot,
           operator: event.operator,
           notes: event.notes,
@@ -1172,23 +1257,68 @@ async function exportExcel(): Promise<void> {
 }
 
 async function checkForUpdates(): Promise<void> {
-  try {
-    if (isTauriRuntime()) {
-      await openUrl(GITHUB_RELEASES_URL);
-    } else {
-      window.open(GITHUB_RELEASES_URL, "_blank", "noopener,noreferrer");
-    }
+  if (!isTauriRuntime()) {
     state.notice = {
       tone: "info",
-      message: "Opened GitHub releases. Install the newest macOS build from there when available.",
+      message: "In-app updates are available in the native Tauri app, not the browser preview.",
     };
+    render();
+    return;
+  }
+
+  state.notice = { tone: "info", message: "Checking for signed app updates..." };
+  render();
+
+  try {
+    const update = await check({ timeout: 15000 });
+    if (!update) {
+      state.notice = { tone: "success", message: "Cell Culture Recorder is up to date." };
+      render();
+      return;
+    }
+
+    const approved = window.confirm(
+      `Install Cell Culture Recorder ${update.version}? The app will restart after the update is installed.`,
+    );
+    if (!approved) {
+      state.notice = { tone: "info", message: `Update ${update.version} is available but was not installed.` };
+      render();
+      return;
+    }
+
+    let downloaded = 0;
+    let contentLength: number | undefined;
+    await update.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        contentLength = event.data.contentLength;
+        downloaded = 0;
+        state.notice = { tone: "info", message: `Downloading update ${update.version}...` };
+        render();
+      }
+      if (event.event === "Progress") {
+        downloaded += event.data.chunkLength;
+        if (contentLength) {
+          const percent = Math.round((downloaded / contentLength) * 100);
+          state.notice = { tone: "info", message: `Downloading update ${update.version}: ${percent}%` };
+          render();
+        }
+      }
+      if (event.event === "Finished") {
+        state.notice = { tone: "info", message: "Installing update..." };
+        render();
+      }
+    });
+
+    state.notice = { tone: "success", message: "Update installed. Relaunching now." };
+    render();
+    await relaunch();
   } catch (error) {
     state.notice = {
       tone: "error",
-      message: error instanceof Error ? error.message : "Could not open the update page.",
+      message: error instanceof Error ? error.message : "Could not check for updates.",
     };
+    render();
   }
-  render();
 }
 
 async function restoreFromFile(event: Event): Promise<void> {
@@ -1259,6 +1389,7 @@ function readVesselDraft(form: HTMLFormElement): VesselDraft {
   const pretreatmentDate = compactText(data.get("pretreatment_date"));
   const dissociationDate = compactText(data.get("dissociation_date"));
   const groundTruthField = (compactText(data.get("ground_truth_date_field")) ?? "seed_date") as GroundTruthDateField;
+  const mediaChanges = readMediaChanges(data);
 
   return {
     culture_name: compactText(data.get("culture_name")) ?? "",
@@ -1270,8 +1401,9 @@ function readVesselDraft(form: HTMLFormElement): VesselDraft {
     parent_batch_id: nullableNumber(data.get("parent_batch_id")),
     started_at: startedAt,
     split_date: compactText(data.get("split_date")),
-    media_change_1_date: compactText(data.get("media_change_1_date")),
-    media_change_2_date: compactText(data.get("media_change_2_date")),
+    media_change_1_date: mediaChanges[0]?.date ?? null,
+    media_change_2_date: mediaChanges[1]?.date ?? null,
+    media_changes: mediaChanges,
     source_record_type: (compactText(data.get("source_record_type")) ?? "culture_vessel") as SourceRecordType,
     raw_source_identifier: compactText(data.get("raw_source_identifier")),
     pretreatment_date: pretreatmentDate,
@@ -1292,15 +1424,36 @@ function buildRawIntakeJson(data: FormData): string {
   const fields = Object.fromEntries(
     RAW_INTAKE_FIELDS.map((field) => [field, compactText(data.get(field)) ?? ""]),
   );
+  const mediaChanges = readMediaChanges(data);
 
   return JSON.stringify(
     {
       captured_at: new Date().toISOString(),
       fields,
+      media_changes: mediaChanges,
     },
     null,
     2,
   );
+}
+
+function readMediaChanges(data: FormData): MediaChangeDraft[] {
+  const dates = data.getAll("media_change_date");
+  const media = data.getAll("media_change_medium");
+  const count = Math.max(dates.length, media.length);
+  const changes: MediaChangeDraft[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const change = {
+      date: compactText(dates[index] ?? null),
+      medium: compactText(media[index] ?? null),
+    };
+    if (change.date || change.medium) {
+      changes.push(change);
+    }
+  }
+
+  return changes;
 }
 
 function groundTruthDate(input: GroundTruthSource): string | null {
@@ -1330,6 +1483,9 @@ function buildBatchWarnings(batch: CultureBatchView): string[] {
       split_date: batch.split_date,
       media_change_1_date: batch.media_change_1_date,
       media_change_2_date: batch.media_change_2_date,
+      media_changes: [batch.media_change_1_date, batch.media_change_2_date]
+        .filter((date): date is string => Boolean(date))
+        .map((date) => ({ date, medium: batch.medium })),
       source_record_type: batch.source_record_type,
       raw_source_identifier: batch.raw_source_identifier,
       pretreatment_date: batch.pretreatment_date,
@@ -1387,14 +1543,22 @@ function buildDraftWarnings(draft: VesselDraft, ignoreBatchId?: number): string[
     warnings.push("Split date is before seed date.");
   }
 
-  for (const field of [
-    ["media change 1", draft.media_change_1_date],
-    ["media change 2", draft.media_change_2_date],
-  ] as const) {
-    if (draft.started_at && field[1] && dateMs(field[1]) < dateMs(draft.started_at)) {
-      warnings.push(`${field[0]} is before seed date.`);
+  draft.media_changes.forEach((change, index) => {
+    const label = `media change ${index + 1}`;
+    if (change.date && !change.medium) {
+      warnings.push(`${label} has a date but no media type.`);
     }
-  }
+    if (!change.date && change.medium) {
+      warnings.push(`${label} has a media type but no date.`);
+    }
+    if (draft.started_at && change.date && dateMs(change.date) < dateMs(draft.started_at)) {
+      warnings.push(`${label} is before seed date.`);
+    }
+    const previous = draft.media_changes[index - 1];
+    if (previous?.date && change.date && dateMs(change.date) < dateMs(previous.date)) {
+      warnings.push(`${label} is before media change ${index}.`);
+    }
+  });
 
   if (draft.media_change_1_date && draft.media_change_2_date && dateMs(draft.media_change_2_date) < dateMs(draft.media_change_1_date)) {
     warnings.push("Media change 2 is before media change 1.");
@@ -1526,7 +1690,6 @@ function getFilteredBatches(): CultureBatchView[] {
         batch.eye,
         batch.vessel,
         batch.medium,
-        batch.incubator_location,
         batch.raw_source_identifier,
         batch.source_record_type,
         batch.conflict_resolution,

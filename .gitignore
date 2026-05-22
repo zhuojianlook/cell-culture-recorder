@@ -6,3 +6,4 @@ src-tauri/target
 .env
 .env.*
 release-artifacts
+updater-keys

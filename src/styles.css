@@ -475,6 +475,30 @@ textarea {
   font-size: 0.84rem;
 }
 
+.section-title.compact {
+  margin-bottom: 10px;
+}
+
+.media-change-editor {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+
+.media-change-rows {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.media-change-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.75fr) minmax(220px, 1fr) 38px;
+  gap: 10px;
+  align-items: end;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -950,5 +974,9 @@ tr.selected-row {
 
   .four-col {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .media-change-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 38px;
   }
 }
