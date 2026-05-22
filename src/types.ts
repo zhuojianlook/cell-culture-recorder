@@ -2,6 +2,10 @@ export type CultureStatus = "active" | "frozen" | "discarded" | "contaminated";
 
 export type Eye = "OD" | "OS" | "OU" | "unknown";
 
+export type SourceRecordType = "culture_vessel" | "primary_tissue_dissociation" | "mixed_source_note";
+
+export type GroundTruthDateField = "seed_date" | "dissociation_date" | "pretreatment_date" | "unresolved";
+
 export type EventType =
   | "feeding"
   | "passage"
@@ -44,6 +48,14 @@ export interface CultureBatch {
   split_date: string | null;
   media_change_1_date: string | null;
   media_change_2_date: string | null;
+  source_record_type: SourceRecordType;
+  raw_source_identifier: string | null;
+  pretreatment_date: string | null;
+  dissociation_date: string | null;
+  ground_truth_date_field: GroundTruthDateField;
+  ground_truth_date: string | null;
+  conflict_resolution: string | null;
+  raw_intake_json: string;
   growth_notes: string | null;
   source_documentation: string | null;
   created_at: string;
@@ -102,6 +114,14 @@ export interface CreateVesselInput {
   split_date: string | null;
   media_change_1_date: string | null;
   media_change_2_date: string | null;
+  source_record_type: SourceRecordType;
+  raw_source_identifier: string | null;
+  pretreatment_date: string | null;
+  dissociation_date: string | null;
+  ground_truth_date_field: GroundTruthDateField;
+  ground_truth_date: string | null;
+  conflict_resolution: string | null;
+  raw_intake_json: string;
   medium: string | null;
   seeding_density: string | null;
   incubator_location: string | null;
@@ -127,7 +147,7 @@ export interface CreateEventInput {
 
 export interface BackupPackage {
   app: "cell-culture-recorder";
-  version: 2;
+  version: 1 | 2 | 3;
   exportedAt: string;
   checksum: string;
   data: {

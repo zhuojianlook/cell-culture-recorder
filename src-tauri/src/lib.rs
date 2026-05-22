@@ -16,6 +16,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/002_donor_vessel_lineage.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "add_source_conflict_tracking",
+            sql: include_str!("../migrations/003_source_conflict_tracking.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

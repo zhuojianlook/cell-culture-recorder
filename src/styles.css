@@ -447,6 +447,34 @@ textarea {
   padding-top: 2px;
 }
 
+.provenance-section {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdfc;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.section-title > svg {
+  color: var(--warning);
+}
+
+.section-title strong,
+.section-title span {
+  display: block;
+}
+
+.section-title span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -558,6 +586,19 @@ label {
 .note-block p {
   margin: 0;
   color: var(--muted);
+}
+
+.raw-input-block pre {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: #eef4f2;
+  color: var(--text);
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .tree-stack {

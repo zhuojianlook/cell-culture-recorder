@@ -14,6 +14,8 @@ import type {
   CultureStore,
   EventType,
   Eye,
+  GroundTruthDateField,
+  SourceRecordType,
 } from "./types";
 import {
   compactText,
@@ -59,7 +61,21 @@ interface VesselDraft {
   split_date: string | null;
   media_change_1_date: string | null;
   media_change_2_date: string | null;
+  source_record_type: SourceRecordType;
+  raw_source_identifier: string | null;
+  pretreatment_date: string | null;
+  dissociation_date: string | null;
+  ground_truth_date_field: GroundTruthDateField;
+  ground_truth_date: string | null;
+  conflict_resolution: string | null;
   status: CultureStatus;
+}
+
+interface GroundTruthSource {
+  started_at: string | null;
+  pretreatment_date: string | null;
+  dissociation_date: string | null;
+  ground_truth_date_field: GroundTruthDateField;
 }
 
 const COMMON_FLASKS = [
@@ -73,6 +89,32 @@ const COMMON_FLASKS = [
   "24-well plate",
   "60 mm dish",
   "100 mm dish",
+];
+
+const RAW_INTAKE_FIELDS = [
+  "culture_name",
+  "donor_identifier",
+  "eye",
+  "label",
+  "passage_number",
+  "vessel",
+  "parent_batch_id",
+  "status",
+  "started_at",
+  "split_date",
+  "media_change_1_date",
+  "media_change_2_date",
+  "source_record_type",
+  "raw_source_identifier",
+  "pretreatment_date",
+  "dissociation_date",
+  "ground_truth_date_field",
+  "conflict_resolution",
+  "medium",
+  "seeding_density",
+  "incubator_location",
+  "growth_notes",
+  "source_documentation",
 ];
 
 const appElement = document.querySelector<HTMLDivElement>("#app");
@@ -390,6 +432,49 @@ function renderVesselIntakeForm(): string {
         </div>
       </div>
 
+      <div class="form-section provenance-section">
+        <div class="section-title">
+          <i data-lucide="file-warning"></i>
+          <div>
+            <strong>Source provenance and conflicts</strong>
+            <span>Capture tissue-source dates separately from flask dates; raw inputs are retained after save.</span>
+          </div>
+        </div>
+
+        <div class="three-col">
+          <label>Source entry type
+            <select name="source_record_type">
+              <option value="culture_vessel">Culture vessel / flask</option>
+              <option value="primary_tissue_dissociation">Primary tissue / dissociation</option>
+              <option value="mixed_source_note">Mixed or ambiguous source note</option>
+            </select>
+          </label>
+          <label>Raw source ID
+            <input name="raw_source_identifier" list="donor-list" placeholder="6769, 6769 OD, tissue 6769" />
+          </label>
+          <label>Ground truth date
+            <select name="ground_truth_date_field">
+              <option value="seed_date">Seed date is ground truth</option>
+              <option value="dissociation_date">Dissociation date is ground truth</option>
+              <option value="pretreatment_date">Pretreatment date is ground truth</option>
+              <option value="unresolved">Unresolved; keep raw values</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="three-col">
+          <label>Pretreatment date
+            <input name="pretreatment_date" type="date" />
+          </label>
+          <label>Dissociation date
+            <input name="dissociation_date" type="date" />
+          </label>
+          <label>Rename / resolution
+            <input name="conflict_resolution" placeholder="e.g. tissue 6769 dissociation; flask 6769 OD P0 T25" />
+          </label>
+        </div>
+      </div>
+
       <div class="form-section">
         <div class="four-col">
           <label>Seed date
@@ -469,10 +554,20 @@ function renderSelectedDetail(batch: CultureBatchView | null): string {
         <div><dt>Split</dt><dd>${escapeHtml(displayDate(batch.split_date))}</dd></div>
         <div><dt>Media 1</dt><dd>${escapeHtml(displayDate(batch.media_change_1_date))}</dd></div>
         <div><dt>Media 2</dt><dd>${escapeHtml(displayDate(batch.media_change_2_date))}</dd></div>
+        <div><dt>Source type</dt><dd>${escapeHtml(sourceRecordLabel(batch.source_record_type))}</dd></div>
+        <div><dt>Raw source ID</dt><dd>${escapeHtml(batch.raw_source_identifier ?? "Not captured")}</dd></div>
+        <div><dt>Pretreatment</dt><dd>${escapeHtml(displayDate(batch.pretreatment_date))}</dd></div>
+        <div><dt>Dissociation</dt><dd>${escapeHtml(displayDate(batch.dissociation_date))}</dd></div>
+        <div><dt>Ground truth</dt><dd>${escapeHtml(groundTruthLabel(batch.ground_truth_date_field))}</dd></div>
+        <div><dt>Ground truth date</dt><dd>${escapeHtml(displayDate(batch.ground_truth_date))}</dd></div>
       </dl>
 
       ${warnings.length > 0 ? renderWarningList(warnings, "Logic warnings") : `<div class="ok-box"><i data-lucide="circle-check"></i><span>No lineage/date warnings for this vessel.</span></div>`}
 
+      <div class="note-block">
+        <strong>Conflict resolution</strong>
+        <p>${escapeHtml(batch.conflict_resolution ?? "No explicit ground-truth note recorded.")}</p>
+      </div>
       <div class="note-block">
         <strong>Growth notes</strong>
         <p>${escapeHtml(batch.growth_notes ?? batch.notes ?? "No notes recorded.")}</p>
@@ -480,6 +575,10 @@ function renderSelectedDetail(batch: CultureBatchView | null): string {
       <div class="note-block">
         <strong>Source documentation</strong>
         <p>${escapeHtml(batch.source_documentation ?? "No source text captured.")}</p>
+      </div>
+      <div class="note-block raw-input-block">
+        <strong>Raw intake snapshot</strong>
+        <pre>${escapeHtml(prettyRawIntake(batch.raw_intake_json))}</pre>
       </div>
     </aside>
   `;
@@ -890,6 +989,14 @@ async function handleVesselSubmit(event: SubmitEvent): Promise<void> {
     split_date: compactText(data.get("split_date")),
     media_change_1_date: compactText(data.get("media_change_1_date")),
     media_change_2_date: compactText(data.get("media_change_2_date")),
+    source_record_type: (compactText(data.get("source_record_type")) ?? "culture_vessel") as SourceRecordType,
+    raw_source_identifier: compactText(data.get("raw_source_identifier")),
+    pretreatment_date: compactText(data.get("pretreatment_date")),
+    dissociation_date: compactText(data.get("dissociation_date")),
+    ground_truth_date_field: (compactText(data.get("ground_truth_date_field")) ?? "seed_date") as GroundTruthDateField,
+    ground_truth_date: null,
+    conflict_resolution: compactText(data.get("conflict_resolution")),
+    raw_intake_json: buildRawIntakeJson(data),
     medium: compactText(data.get("medium")),
     seeding_density: compactText(data.get("seeding_density")),
     incubator_location: compactText(data.get("incubator_location")),
@@ -897,6 +1004,7 @@ async function handleVesselSubmit(event: SubmitEvent): Promise<void> {
     growth_notes: compactText(data.get("growth_notes")),
     source_documentation: compactText(data.get("source_documentation")),
   };
+  input.ground_truth_date = groundTruthDate(input);
 
   await runMutation("Vessel record saved.", async () => {
     const id = await store.createVessel(input);
@@ -963,6 +1071,13 @@ async function exportExcel(): Promise<void> {
         split_date: batch.split_date,
         media_change_1_date: batch.media_change_1_date,
         media_change_2_date: batch.media_change_2_date,
+        source_record_type: sourceRecordLabel(batch.source_record_type),
+        raw_source_identifier: batch.raw_source_identifier,
+        pretreatment_date: batch.pretreatment_date,
+        dissociation_date: batch.dissociation_date,
+        ground_truth_date_field: groundTruthLabel(batch.ground_truth_date_field),
+        ground_truth_date: batch.ground_truth_date,
+        conflict_resolution: batch.conflict_resolution,
         medium: batch.medium,
         seeding_density: batch.seeding_density,
         location: batch.incubator_location,
@@ -1004,6 +1119,18 @@ async function exportExcel(): Promise<void> {
         source: line.source,
         identifiers: line.identifiers,
         notes: line.notes,
+      })),
+    },
+    {
+      name: "Raw Intake",
+      rows: state.batches.map((batch) => ({
+        vessel_id: batch.id,
+        donor_id: batch.donor_identifier,
+        eye: eyeLabel(batch.eye),
+        vessel_label: batch.label,
+        raw_source_identifier: batch.raw_source_identifier,
+        source_documentation: batch.source_documentation,
+        raw_intake_json: batch.raw_intake_json,
       })),
     },
   ]);
@@ -1096,6 +1223,11 @@ function updateIntakeWarnings(): void {
 
 function readVesselDraft(form: HTMLFormElement): VesselDraft {
   const data = new FormData(form);
+  const startedAt = compactText(data.get("started_at"));
+  const pretreatmentDate = compactText(data.get("pretreatment_date"));
+  const dissociationDate = compactText(data.get("dissociation_date"));
+  const groundTruthField = (compactText(data.get("ground_truth_date_field")) ?? "seed_date") as GroundTruthDateField;
+
   return {
     culture_name: compactText(data.get("culture_name")) ?? "",
     donor_identifier: compactText(data.get("donor_identifier")),
@@ -1104,12 +1236,52 @@ function readVesselDraft(form: HTMLFormElement): VesselDraft {
     passage_number: nullableNumber(data.get("passage_number")),
     vessel: compactText(data.get("vessel")) ?? "",
     parent_batch_id: nullableNumber(data.get("parent_batch_id")),
-    started_at: compactText(data.get("started_at")),
+    started_at: startedAt,
     split_date: compactText(data.get("split_date")),
     media_change_1_date: compactText(data.get("media_change_1_date")),
     media_change_2_date: compactText(data.get("media_change_2_date")),
+    source_record_type: (compactText(data.get("source_record_type")) ?? "culture_vessel") as SourceRecordType,
+    raw_source_identifier: compactText(data.get("raw_source_identifier")),
+    pretreatment_date: pretreatmentDate,
+    dissociation_date: dissociationDate,
+    ground_truth_date_field: groundTruthField,
+    ground_truth_date: groundTruthDate({
+      started_at: startedAt,
+      pretreatment_date: pretreatmentDate,
+      dissociation_date: dissociationDate,
+      ground_truth_date_field: groundTruthField,
+    }),
+    conflict_resolution: compactText(data.get("conflict_resolution")),
     status: (compactText(data.get("status")) ?? "active") as CultureStatus,
   };
+}
+
+function buildRawIntakeJson(data: FormData): string {
+  const fields = Object.fromEntries(
+    RAW_INTAKE_FIELDS.map((field) => [field, compactText(data.get(field)) ?? ""]),
+  );
+
+  return JSON.stringify(
+    {
+      captured_at: new Date().toISOString(),
+      fields,
+    },
+    null,
+    2,
+  );
+}
+
+function groundTruthDate(input: GroundTruthSource): string | null {
+  if (input.ground_truth_date_field === "seed_date") {
+    return input.started_at;
+  }
+  if (input.ground_truth_date_field === "dissociation_date") {
+    return input.dissociation_date;
+  }
+  if (input.ground_truth_date_field === "pretreatment_date") {
+    return input.pretreatment_date;
+  }
+  return null;
 }
 
 function buildBatchWarnings(batch: CultureBatchView): string[] {
@@ -1126,6 +1298,13 @@ function buildBatchWarnings(batch: CultureBatchView): string[] {
       split_date: batch.split_date,
       media_change_1_date: batch.media_change_1_date,
       media_change_2_date: batch.media_change_2_date,
+      source_record_type: batch.source_record_type,
+      raw_source_identifier: batch.raw_source_identifier,
+      pretreatment_date: batch.pretreatment_date,
+      dissociation_date: batch.dissociation_date,
+      ground_truth_date_field: batch.ground_truth_date_field,
+      ground_truth_date: batch.ground_truth_date,
+      conflict_resolution: batch.conflict_resolution,
       status: batch.status,
     },
     batch.id,
@@ -1189,6 +1368,84 @@ function buildDraftWarnings(draft: VesselDraft, ignoreBatchId?: number): string[
     warnings.push("Media change 2 is before media change 1.");
   }
 
+  if (draft.source_record_type === "primary_tissue_dissociation" && draft.vessel) {
+    warnings.push(
+      "This entry is marked as primary tissue/dissociation but also has a flask type. Consider saving the tissue source and P0 flask as separate records if their dates differ.",
+    );
+  }
+
+  if (draft.passage_number === 0 && draft.started_at && draft.dissociation_date && !sameDate(draft.started_at, draft.dissociation_date)) {
+    warnings.push(
+      `P0 seed date (${displayDate(draft.started_at)}) differs from dissociation date (${displayDate(
+        draft.dissociation_date,
+      )}). Choose a ground-truth date and keep the other date as raw provenance.`,
+    );
+  }
+
+  if (draft.ground_truth_date_field === "dissociation_date" && !draft.dissociation_date) {
+    warnings.push("Dissociation date is selected as ground truth, but no dissociation date is entered.");
+  }
+
+  if (draft.ground_truth_date_field === "pretreatment_date" && !draft.pretreatment_date) {
+    warnings.push("Pretreatment date is selected as ground truth, but no pretreatment date is entered.");
+  }
+
+  if (draft.ground_truth_date_field === "unresolved" && !draft.conflict_resolution) {
+    warnings.push("Ground truth is unresolved. Add a rename/resolution note so the ambiguity is traceable.");
+  }
+
+  const normalizedSourceId = normalizeSourceId(draft.raw_source_identifier ?? draft.donor_identifier);
+  if (normalizedSourceId) {
+    const sourcePeers = peers.filter((batch) => {
+      const batchSourceId = normalizeSourceId(batch.raw_source_identifier ?? batch.donor_identifier);
+      return batchSourceId === normalizedSourceId && (batch.eye ?? "unknown") === draft.eye;
+    });
+    const suggestedLabel = suggestSourceConflictRename(draft);
+
+    sourcePeers.forEach((batch) => {
+      if (batch.source_record_type !== draft.source_record_type) {
+        warnings.push(
+          `Raw source ID already appears as ${sourceRecordLabel(batch.source_record_type)} on "${batch.label}". Suggested rename: ${suggestedLabel}.`,
+        );
+      }
+
+      if (
+        draft.dissociation_date &&
+        batch.dissociation_date &&
+        !sameDate(draft.dissociation_date, batch.dissociation_date)
+      ) {
+        warnings.push(
+          `Dissociation date differs from existing raw-source match "${batch.label}" (${displayDate(batch.dissociation_date)}).`,
+        );
+      }
+
+      if (
+        draft.passage_number === batch.passage_number &&
+        draft.started_at &&
+        batch.started_at &&
+        !sameDate(draft.started_at, batch.started_at)
+      ) {
+        warnings.push(
+          `Same raw source and passage as "${batch.label}", but seed dates differ (${displayDate(batch.started_at)} vs ${displayDate(
+            draft.started_at,
+          )}). Keep one as ground truth and note whether one field should be renamed.`,
+        );
+      }
+
+      if (
+        draft.passage_number === 0 &&
+        draft.dissociation_date &&
+        batch.passage_number === 0 &&
+        batch.started_at &&
+        !sameDate(draft.dissociation_date, batch.started_at)
+      ) {
+        warnings.push(
+          `Dissociation date does not match existing P0 seed date for "${batch.label}". Suggested rename: ${suggestedLabel}.`,
+        );
+      }
+    });
+  }
+
   if (draft.donor_identifier && draft.passage_number !== null && draft.started_at) {
     const draftPassage = draft.passage_number;
     const donorPeers = peers.filter(
@@ -1213,7 +1470,7 @@ function buildDraftWarnings(draft: VesselDraft, ignoreBatchId?: number): string[
     });
   }
 
-  return warnings;
+  return Array.from(new Set(warnings));
 }
 
 function renderWarningList(warnings: string[], title: string): string {
@@ -1238,6 +1495,10 @@ function getFilteredBatches(): CultureBatchView[] {
         batch.vessel,
         batch.medium,
         batch.incubator_location,
+        batch.raw_source_identifier,
+        batch.source_record_type,
+        batch.conflict_resolution,
+        batch.raw_intake_json,
         batch.growth_notes,
         batch.source_documentation,
       ]
@@ -1280,6 +1541,8 @@ function compareTreeNodes(a: CultureBatchView, b: CultureBatchView): number {
 
 function inferredEventsForBatch(batch: CultureBatchView): Array<{ label: string; date: string | null; icon: string }> {
   return [
+    { label: "Pretreatment", date: batch.pretreatment_date, icon: "clipboard-check" },
+    { label: "Dissociation", date: batch.dissociation_date, icon: "scissors" },
     { label: "Seeded", date: batch.started_at, icon: "sprout" },
     { label: "Split", date: batch.split_date, icon: "split" },
     { label: "Media change 1", date: batch.media_change_1_date, icon: "refresh-cw" },
@@ -1306,6 +1569,57 @@ function eyeLabel(eye: Eye | null | undefined): string {
     return "OU";
   }
   return "unknown eye";
+}
+
+function sourceRecordLabel(type: SourceRecordType | null | undefined): string {
+  if (type === "primary_tissue_dissociation") {
+    return "Primary tissue / dissociation";
+  }
+  if (type === "mixed_source_note") {
+    return "Mixed or ambiguous source note";
+  }
+  return "Culture vessel / flask";
+}
+
+function groundTruthLabel(field: GroundTruthDateField | null | undefined): string {
+  if (field === "dissociation_date") {
+    return "Dissociation date";
+  }
+  if (field === "pretreatment_date") {
+    return "Pretreatment date";
+  }
+  if (field === "unresolved") {
+    return "Unresolved";
+  }
+  return "Seed date";
+}
+
+function prettyRawIntake(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function normalizeSourceId(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function sameDate(left: string, right: string): boolean {
+  return left.slice(0, 10) === right.slice(0, 10);
+}
+
+function suggestSourceConflictRename(draft: VesselDraft): string {
+  const donor = draft.donor_identifier ?? draft.raw_source_identifier ?? "source ID";
+  const eye = draft.eye !== "unknown" ? ` ${draft.eye}` : "";
+  if (draft.source_record_type === "primary_tissue_dissociation") {
+    return `${donor}${eye} tissue dissociation source; reserve flask label for ${draft.label || `${donor}${eye} P0 flask`}`;
+  }
+  return `${donor}${eye} ${draft.passage_number === 0 ? "P0" : `P${draft.passage_number ?? "?"}`} flask; keep tissue source as separate raw source record`;
 }
 
 function dateMs(value: string | null | undefined): number {
