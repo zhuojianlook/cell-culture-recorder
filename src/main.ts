@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { createIcons, icons } from "lucide";
 import "./styles.css";
 import { createCultureStore } from "./store";
@@ -18,6 +19,7 @@ import {
   compactText,
   displayDate,
   downloadJson,
+  downloadXlsxWorkbook,
   escapeHtml,
   nowIsoMinute,
   nullableNumber,
@@ -25,6 +27,8 @@ import {
   requiredText,
   todayIsoDate,
 } from "./utils";
+
+const GITHUB_RELEASES_URL = "https://github.com/zhuojianlook/cell-culture-recorder/releases";
 
 type Notice = { tone: "success" | "error" | "info"; message: string } | null;
 
@@ -203,6 +207,14 @@ function render(): void {
             <button id="download-backup-top" class="button primary" type="button">
               <i data-lucide="download"></i>
               <span>Download backup</span>
+            </button>
+            <button id="export-excel-top" class="button" type="button">
+              <i data-lucide="file-spreadsheet"></i>
+              <span>Export Excel</span>
+            </button>
+            <button id="check-updates-top" class="button" type="button">
+              <i data-lucide="refresh-cw"></i>
+              <span>Check updates</span>
             </button>
           </div>
         </header>
@@ -773,6 +785,14 @@ function renderBackupPanel(lastBackup: BackupSnapshot | null): string {
           <i data-lucide="download"></i>
           <span>Download backup</span>
         </button>
+        <button id="export-excel" class="button" type="button">
+          <i data-lucide="file-spreadsheet"></i>
+          <span>Export Excel</span>
+        </button>
+        <button id="check-updates" class="button" type="button">
+          <i data-lucide="refresh-cw"></i>
+          <span>Check updates</span>
+        </button>
         <label class="file-button">
           <i data-lucide="upload"></i>
           <span>Restore from file</span>
@@ -829,6 +849,10 @@ function attachEvents(): void {
   });
   app.querySelector<HTMLButtonElement>("#download-backup-top")?.addEventListener("click", downloadBackup);
   app.querySelector<HTMLButtonElement>("#download-backup")?.addEventListener("click", downloadBackup);
+  app.querySelector<HTMLButtonElement>("#export-excel-top")?.addEventListener("click", exportExcel);
+  app.querySelector<HTMLButtonElement>("#export-excel")?.addEventListener("click", exportExcel);
+  app.querySelector<HTMLButtonElement>("#check-updates-top")?.addEventListener("click", checkForUpdates);
+  app.querySelector<HTMLButtonElement>("#check-updates")?.addEventListener("click", checkForUpdates);
   app.querySelector<HTMLInputElement>("#restore-file")?.addEventListener("change", restoreFromFile);
 
   app.querySelectorAll<HTMLButtonElement>(".select-batch, .tree-node").forEach((button) => {
@@ -916,6 +940,96 @@ async function downloadBackup(): Promise<void> {
     const filename = `donor-culture-backup-${pkg.exportedAt.slice(0, 10)}.json`;
     downloadJson(filename, JSON.stringify(pkg, null, 2));
   });
+}
+
+async function exportExcel(): Promise<void> {
+  const batchById = new Map(state.batches.map((batch) => [batch.id, batch]));
+  const filename = `donor-culture-records-${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+  downloadXlsxWorkbook(filename, [
+    {
+      name: "Vessels",
+      rows: state.batches.map((batch) => ({
+        id: batch.id,
+        donor_id: batch.donor_identifier,
+        eye: eyeLabel(batch.eye),
+        culture_type: batch.cell_line_name,
+        vessel_label: batch.label,
+        passage: batch.passage_number,
+        flask_type: batch.vessel,
+        status: batch.status,
+        parent_vessel: batch.parent_label,
+        seed_date: batch.started_at,
+        split_date: batch.split_date,
+        media_change_1_date: batch.media_change_1_date,
+        media_change_2_date: batch.media_change_2_date,
+        medium: batch.medium,
+        seeding_density: batch.seeding_density,
+        location: batch.incubator_location,
+        growth_notes: batch.growth_notes,
+        source_documentation: batch.source_documentation,
+        warnings: buildBatchWarnings(batch).join(" | "),
+      })),
+    },
+    {
+      name: "Events",
+      rows: state.allEvents.map((event) => {
+        const batch = batchById.get(event.batch_id);
+        return {
+          id: event.id,
+          vessel_id: event.batch_id,
+          donor_id: batch?.donor_identifier,
+          eye: eyeLabel(batch?.eye),
+          vessel_label: batch?.label,
+          passage: batch?.passage_number,
+          event_type: event.event_type,
+          event_at: event.event_at,
+          confluence_percent: event.confluence_percent,
+          viability_percent: event.viability_percent,
+          split_ratio: event.split_ratio,
+          medium: event.medium,
+          reagent_lot: event.reagent_lot,
+          operator: event.operator,
+          notes: event.notes,
+        };
+      }),
+    },
+    {
+      name: "Culture Types",
+      rows: state.cellLines.map((line) => ({
+        id: line.id,
+        name: line.name,
+        species: line.species,
+        tissue: line.tissue,
+        source: line.source,
+        identifiers: line.identifiers,
+        notes: line.notes,
+      })),
+    },
+  ]);
+
+  state.notice = { tone: "success", message: "Excel workbook exported." };
+  render();
+}
+
+async function checkForUpdates(): Promise<void> {
+  try {
+    if (isTauriRuntime()) {
+      await openUrl(GITHUB_RELEASES_URL);
+    } else {
+      window.open(GITHUB_RELEASES_URL, "_blank", "noopener,noreferrer");
+    }
+    state.notice = {
+      tone: "info",
+      message: "Opened GitHub releases. Install the newest macOS build from there when available.",
+    };
+  } catch (error) {
+    state.notice = {
+      tone: "error",
+      message: error instanceof Error ? error.message : "Could not open the update page.",
+    };
+  }
+  render();
 }
 
 async function restoreFromFile(event: Event): Promise<void> {
@@ -1200,6 +1314,10 @@ function dateMs(value: string | null | undefined): number {
   }
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? Number.NaN : parsed.getTime();
+}
+
+function isTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 function statusOption(value: AppState["statusFilter"], label: string): string {
