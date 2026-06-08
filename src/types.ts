@@ -130,6 +130,13 @@ export interface CreateVesselInput {
   source_documentation: string | null;
 }
 
+// A vessel coming in through the bulk importer. Same payload as a manual intake,
+// plus a transient `parent_label` that is resolved to a parent_batch_id after all
+// rows are inserted (so a parent can be another row in the same import).
+export interface ImportVesselInput extends CreateVesselInput {
+  parent_label: string | null;
+}
+
 export interface CreateEventInput {
   batch_id: number;
   event_type: EventType;
@@ -167,6 +174,7 @@ export interface CultureStore {
   listAuditEntries(limit?: number): Promise<AuditEntry[]>;
   listBackups(limit?: number): Promise<BackupSnapshot[]>;
   createVessel(input: CreateVesselInput): Promise<number>;
+  importVessels(inputs: ImportVesselInput[]): Promise<number[]>;
   recordEvent(input: CreateEventInput): Promise<void>;
   exportBackup(label: string): Promise<BackupPackage>;
   restoreBackup(pkg: BackupPackage): Promise<void>;

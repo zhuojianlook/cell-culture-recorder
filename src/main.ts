@@ -16,8 +16,17 @@ import type {
   EventType,
   Eye,
   GroundTruthDateField,
+  ImportVesselInput,
   SourceRecordType,
 } from "./types";
+import {
+  autoMap,
+  buildImportRawIntake,
+  IMPORT_FIELDS,
+  parseTabularFile,
+  rowToDraft,
+} from "./import";
+import type { ColumnMapping, ImportDraft, ImportFieldKey } from "./import";
 import {
   compactText,
   displayDate,
@@ -46,6 +55,27 @@ interface AppState {
   notice: Notice;
   saving: boolean;
   mode: CultureStore["mode"];
+  importWizard: ImportWizardState | null;
+}
+
+interface ImportWizardState {
+  stage: "load" | "map" | "review" | "summary";
+  fileName: string;
+  headers: string[];
+  rows: string[][];
+  mapping: ColumnMapping;
+  cursor: number;
+  accepted: Map<number, AcceptedImportRow>;
+  skipped: Set<number>;
+  rowError: string | null;
+}
+
+interface AcceptedImportRow {
+  sourceIndex: number;
+  input: ImportVesselInput;
+  draft: ImportDraft;
+  warnings: string[];
+  possibleDuplicate: boolean;
 }
 
 interface VesselDraft {
@@ -142,6 +172,7 @@ const state: AppState = {
   notice: null,
   saving: false,
   mode: "browser-preview",
+  importWizard: null,
 };
 
 async function boot(): Promise<void> {
@@ -209,6 +240,7 @@ function render(): void {
 
         <nav class="nav-stack" aria-label="Primary">
           <a href="#intake"><i data-lucide="clipboard-plus"></i><span>Intake</span></a>
+          <a href="#import"><i data-lucide="file-up"></i><span>Import</span></a>
           <a href="#lineage"><i data-lucide="git-branch"></i><span>Lineage</span></a>
           <a href="#records"><i data-lucide="table-2"></i><span>Records</span></a>
           <a href="#backup"><i data-lucide="database-backup"></i><span>Backups</span></a>
@@ -301,6 +333,10 @@ function render(): void {
             </div>
             ${renderTimeline(selectedBatch)}
           </div>
+        </section>
+
+        <section id="import" class="panel import-panel">
+          ${renderImportSection()}
         </section>
 
         <section id="records" class="panel culture-panel">
@@ -985,6 +1021,7 @@ function attachEvents(): void {
   app.querySelector<HTMLInputElement>("#restore-file")?.addEventListener("change", restoreFromFile);
 
   attachBatchSelectionEvents();
+  attachImportEvents();
 
   app.querySelectorAll<HTMLButtonElement>(".restore-snapshot").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -1375,7 +1412,7 @@ function updateIntakeWarnings(): void {
     return;
   }
 
-  const warnings = buildDraftWarnings(readVesselDraft(form));
+  const warnings = buildDraftWarnings(readVesselDraft(form), state.batches);
   target.innerHTML =
     warnings.length > 0
       ? renderWarningList(warnings, "Check before saving")
@@ -1495,15 +1532,32 @@ function buildBatchWarnings(batch: CultureBatchView): string[] {
       conflict_resolution: batch.conflict_resolution,
       status: batch.status,
     },
+    state.batches,
     batch.id,
   );
 }
 
-function buildDraftWarnings(draft: VesselDraft, ignoreBatchId?: number): string[] {
+// The subset of a batch that warning checks read. `state.batches` (CultureBatchView[])
+// satisfies this structurally; import preview also passes synthetic peers for the rows
+// already accepted in the same file, so intra-file conflicts are caught too.
+type WarningPeer = Pick<
+  CultureBatchView,
+  | "id"
+  | "label"
+  | "passage_number"
+  | "started_at"
+  | "donor_identifier"
+  | "eye"
+  | "raw_source_identifier"
+  | "source_record_type"
+  | "dissociation_date"
+>;
+
+function buildDraftWarnings(draft: VesselDraft, allBatches: WarningPeer[], ignoreBatchId?: number): string[] {
   const warnings: string[] = [];
   const label = draft.label.trim().toLowerCase();
   const donor = draft.donor_identifier?.trim().toLowerCase() ?? "";
-  const peers = state.batches.filter((batch) => batch.id !== ignoreBatchId);
+  const peers = allBatches.filter((batch) => batch.id !== ignoreBatchId);
 
   if (!draft.donor_identifier) {
     warnings.push("No donor ID entered; the vessel will be grouped under unknown donor.");
@@ -1521,7 +1575,7 @@ function buildDraftWarnings(draft: VesselDraft, ignoreBatchId?: number): string[
   }
 
   const parent = draft.parent_batch_id
-    ? state.batches.find((batch) => batch.id === draft.parent_batch_id && batch.id !== ignoreBatchId)
+    ? allBatches.find((batch) => batch.id === draft.parent_batch_id && batch.id !== ignoreBatchId)
     : null;
 
   if (parent) {
@@ -1870,6 +1924,621 @@ function boundedPercent(value: FormDataEntryValue | null, label: string): number
   }
 
   return parsed;
+}
+
+// ---------------------------------------------------------------------------
+// Import wizard
+// ---------------------------------------------------------------------------
+function renderImportSection(): string {
+  const wiz = state.importWizard;
+  if (!wiz) {
+    return renderImportLoad();
+  }
+  if (wiz.stage === "map") {
+    return renderImportMapping(wiz);
+  }
+  if (wiz.stage === "review") {
+    return renderImportReview(wiz);
+  }
+  return renderImportSummary(wiz);
+}
+
+function renderImportLoad(): string {
+  return `
+    <div class="panel-header">
+      <div>
+        <p class="eyebrow">Bring in existing records</p>
+        <h2>Import from CSV / Excel</h2>
+      </div>
+      <i data-lucide="file-up"></i>
+    </div>
+    <div class="form-section import-load">
+      <p class="import-hint">
+        The first row must be column headers. You then review every row one at a time, checking the
+        parsed record against the original line — nothing is saved until you confirm it.
+      </p>
+      <label class="file-button">
+        <i data-lucide="upload"></i>
+        <span>Choose a .csv or .xlsx file</span>
+        <input id="import-file" type="file"
+          accept=".csv,.tsv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      </label>
+      <p class="import-subtle">Excel tip: if a .xlsx won't open on older macOS, use File &rarr; Save As &rarr; CSV.</p>
+    </div>
+  `;
+}
+
+function renderImportMapping(wiz: ImportWizardState): string {
+  const columnOptions = (selected: number | null): string =>
+    [`<option value="">— not mapped —</option>`]
+      .concat(
+        wiz.headers.map(
+          (header, index) =>
+            `<option value="${index}" ${selected === index ? "selected" : ""}>${escapeHtml(
+              header || `Column ${index + 1}`,
+            )}</option>`,
+        ),
+      )
+      .join("");
+
+  const fieldRows = IMPORT_FIELDS.map(
+    (field) => `
+      <tr>
+        <td>${escapeHtml(field.label)}${field.required ? ' <span class="req">*</span>' : ""}</td>
+        <td><select data-map-field="${field.key}">${columnOptions(wiz.mapping[field.key])}</select></td>
+      </tr>`,
+  ).join("");
+
+  return `
+    <div class="panel-header">
+      <div>
+        <p class="eyebrow">${escapeHtml(wiz.fileName)} / ${wiz.rows.length} data rows</p>
+        <h2>Match your columns</h2>
+      </div>
+      <button id="import-cancel" class="button subtle" type="button"><i data-lucide="x"></i><span>Cancel</span></button>
+    </div>
+    <div class="form-section">
+      <p class="import-hint">Columns were auto-matched — fix any that are wrong. Required fields are marked <span class="req">*</span>.</p>
+      <div class="table-wrap mapping-table">
+        <table>
+          <thead><tr><th>App field</th><th>Source column</th></tr></thead>
+          <tbody>${fieldRows}</tbody>
+        </table>
+      </div>
+      <button id="import-start-review" class="button primary" type="button">
+        <i data-lucide="arrow-right"></i><span>Start row-by-row review</span>
+      </button>
+    </div>
+  `;
+}
+
+function renderImportReview(wiz: ImportWizardState): string {
+  const draft = currentImportDraft(wiz);
+  const cells = wiz.rows[wiz.cursor];
+  const rowStatus = wiz.accepted.has(wiz.cursor) ? "confirmed" : wiz.skipped.has(wiz.cursor) ? "skipped" : "pending";
+
+  const rawRows = wiz.headers
+    .map(
+      (header, index) =>
+        `<div><dt>${escapeHtml(header || `Column ${index + 1}`)}</dt><dd>${escapeHtml(cells[index] ?? "")}</dd></div>`,
+    )
+    .join("");
+
+  const flags = renderImportRowFlags(
+    buildDraftWarnings(draftToVesselDraft(draft), importPeers(wiz.cursor)),
+    isPossibleDuplicate(draft),
+    draft,
+  );
+
+  return `
+    <div class="panel-header">
+      <div>
+        <p class="eyebrow">${escapeHtml(wiz.fileName)}</p>
+        <h2>Review row ${wiz.cursor + 1} of ${wiz.rows.length}</h2>
+      </div>
+      <div class="import-progress">
+        <span class="mini-badge ok">${wiz.accepted.size} confirmed</span>
+        <span class="mini-badge">${wiz.skipped.size} skipped</span>
+        <button id="import-cancel" class="button subtle" type="button"><i data-lucide="x"></i><span>Cancel</span></button>
+      </div>
+    </div>
+
+    <div class="import-grid">
+      <aside class="raw-line">
+        <div class="section-title compact">
+          <i data-lucide="file-text"></i>
+          <div><strong>Raw source line</strong><span>File row ${wiz.cursor + 2}${rowStatus !== "pending" ? ` / ${rowStatus}` : ""}</span></div>
+        </div>
+        <dl class="detail-grid raw-grid">${rawRows}</dl>
+      </aside>
+
+      <form id="import-row-form" class="form-section import-fields">
+        ${renderImportFields(draft)}
+        <div id="import-row-warnings" class="import-flags">${flags}</div>
+        ${wiz.rowError ? `<div class="notice error"><i data-lucide="circle-alert"></i><span>${escapeHtml(wiz.rowError)}</span></div>` : ""}
+        <div class="import-actions">
+          <button id="import-back" class="button subtle" type="button" ${wiz.cursor === 0 ? "disabled" : ""}>
+            <i data-lucide="arrow-left"></i><span>Back</span>
+          </button>
+          <button id="import-skip" class="button" type="button"><i data-lucide="skip-forward"></i><span>Skip row</span></button>
+          <button id="import-confirm" class="button primary" type="submit"><i data-lucide="check"></i><span>Confirm &amp; next</span></button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
+function renderImportFields(draft: ImportDraft): string {
+  return `
+    <div class="three-col">
+      <label>Donor ID<input name="donor_identifier" list="donor-list" value="${escapeHtml(draft.donor_identifier)}" /></label>
+      <label>Eye${selectField("eye", draft.eye, [["OD", "OD - right"], ["OS", "OS - left"], ["OU", "OU - both/pooled"], ["unknown", "Unknown"]])}</label>
+      <label>Culture type<input name="culture_name" list="culture-name-list" value="${escapeHtml(draft.culture_name)}" /></label>
+    </div>
+    <div class="three-col">
+      <label>Vessel label <span class="req">*</span><input name="label" list="vessel-label-list" value="${escapeHtml(draft.label)}" /></label>
+      <label>Passage <span class="req">*</span><input name="passage_number" type="number" min="0" value="${escapeHtml(draft.passage_number)}" /></label>
+      <label>Flask type <span class="req">*</span><input name="vessel" list="flask-type-list" value="${escapeHtml(draft.vessel)}" /></label>
+    </div>
+    <div class="three-col">
+      <label>Seed date <span class="req">*</span><input name="started_at" type="date" value="${escapeHtml(draft.started_at)}" /></label>
+      <label>Split date<input name="split_date" type="date" value="${escapeHtml(draft.split_date)}" /></label>
+      <label>Parent vessel label<input name="parent_label" list="vessel-label-list" value="${escapeHtml(draft.parent_label)}" /></label>
+    </div>
+    <div class="three-col">
+      <label>Status${selectField("status", draft.status, [["active", "Active"], ["contaminated", "Contaminated"], ["frozen", "Frozen"], ["discarded", "Discarded"]])}</label>
+      <label>Source type${selectField("source_record_type", draft.source_record_type, [["culture_vessel", "Culture vessel / flask"], ["primary_tissue_dissociation", "Primary tissue / dissociation"], ["mixed_source_note", "Mixed / ambiguous"]])}</label>
+      <label>Ground-truth date${selectField("ground_truth_date_field", draft.ground_truth_date_field, [["seed_date", "Seed date"], ["dissociation_date", "Dissociation date"], ["pretreatment_date", "Pretreatment date"], ["unresolved", "Unresolved"]])}</label>
+    </div>
+    <div class="three-col">
+      <label>Raw source ID<input name="raw_source_identifier" list="donor-list" value="${escapeHtml(draft.raw_source_identifier)}" /></label>
+      <label>Pretreatment date<input name="pretreatment_date" type="date" value="${escapeHtml(draft.pretreatment_date)}" /></label>
+      <label>Dissociation date<input name="dissociation_date" type="date" value="${escapeHtml(draft.dissociation_date)}" /></label>
+    </div>
+    <div class="two-col">
+      <label>Media type<input name="medium" list="media-list" value="${escapeHtml(draft.medium)}" /></label>
+      <label>Seeding density<input name="seeding_density" value="${escapeHtml(draft.seeding_density)}" /></label>
+    </div>
+    <div class="two-col">
+      <label>Incubator location<input name="incubator_location" value="${escapeHtml(draft.incubator_location)}" /></label>
+      <label>Conflict / resolution note<input name="conflict_resolution" value="${escapeHtml(draft.conflict_resolution)}" /></label>
+    </div>
+    <label>Growth notes<textarea name="growth_notes" rows="2">${escapeHtml(draft.growth_notes)}</textarea></label>
+    <label>Source documentation<textarea name="source_documentation" rows="2">${escapeHtml(draft.source_documentation)}</textarea></label>
+  `;
+}
+
+function selectField(name: string, selected: string, options: Array<[string, string]>): string {
+  return `<select name="${name}">${options
+    .map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("")}</select>`;
+}
+
+function renderImportRowFlags(warnings: string[], duplicate: boolean, draft: ImportDraft): string {
+  const parent = previewParentStatus(draft, state.importWizard?.cursor ?? -1);
+  const badges = [
+    duplicate ? `<span class="mini-badge warn">Possible duplicate of an existing vessel</span>` : "",
+    parent,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const warningBlock =
+    warnings.length > 0
+      ? renderWarningList(warnings, "Check before confirming")
+      : `<div class="ok-box"><i data-lucide="circle-check"></i><span>No logic warnings for this row.</span></div>`;
+  return `${badges ? `<div class="import-badges">${badges}</div>` : ""}${warningBlock}`;
+}
+
+function previewParentStatus(draft: ImportDraft, excludeIndex: number): string {
+  const target = draft.parent_label.trim().toLowerCase();
+  if (!target) {
+    return "";
+  }
+  let matches = state.batches.filter((batch) => batch.label.trim().toLowerCase() === target).length;
+  state.importWizard?.accepted.forEach((row) => {
+    if (row.sourceIndex !== excludeIndex && row.input.label.trim().toLowerCase() === target) {
+      matches += 1;
+    }
+  });
+  if (matches === 0) {
+    return `<span class="mini-badge warn">Parent "${escapeHtml(draft.parent_label)}" not found yet</span>`;
+  }
+  if (matches > 1) {
+    return `<span class="mini-badge warn">Parent "${escapeHtml(draft.parent_label)}" is ambiguous (${matches} matches)</span>`;
+  }
+  return `<span class="mini-badge ok">Parent &rarr; ${escapeHtml(draft.parent_label)}</span>`;
+}
+
+function renderImportSummary(wiz: ImportWizardState): string {
+  const accepted = Array.from(wiz.accepted.values()).sort((a, b) => a.sourceIndex - b.sourceIndex);
+  const withWarnings = accepted.filter((row) => row.warnings.length > 0).length;
+  const dups = accepted.filter((row) => row.possibleDuplicate).length;
+
+  const rows = accepted
+    .map(
+      (row) => `
+      <tr>
+        <td>
+          <strong>${escapeHtml(row.input.label)}</strong>
+          <span>${escapeHtml(row.input.donor_identifier ?? "Unknown donor")} ${escapeHtml(eyeLabel(row.input.eye))} / P${row.input.passage_number}</span>
+        </td>
+        <td>${escapeHtml(displayDate(row.input.started_at))}</td>
+        <td>
+          ${row.possibleDuplicate ? `<span class="mini-badge warn">dup?</span>` : ""}
+          ${row.warnings.length > 0 ? `<span class="warning-count">${row.warnings.length}</span>` : `<span class="muted">0</span>`}
+        </td>
+      </tr>`,
+    )
+    .join("");
+
+  return `
+    <div class="panel-header">
+      <div>
+        <p class="eyebrow">${escapeHtml(wiz.fileName)}</p>
+        <h2>Ready to import</h2>
+      </div>
+      <button id="import-cancel" class="button subtle" type="button"><i data-lucide="x"></i><span>Cancel</span></button>
+    </div>
+    <div class="form-section">
+      <div class="import-summary-stats">
+        <span class="mini-badge ok">${accepted.length} to import</span>
+        <span class="mini-badge">${wiz.skipped.size} skipped</span>
+        ${withWarnings > 0 ? `<span class="warning-count">${withWarnings} with warnings</span>` : ""}
+        ${dups > 0 ? `<span class="mini-badge warn">${dups} possible duplicates</span>` : ""}
+      </div>
+      ${
+        accepted.length === 0
+          ? `<div class="empty-state"><i data-lucide="inbox"></i><p>No rows were confirmed. Go back to review them.</p></div>`
+          : `<div class="table-wrap"><table><thead><tr><th>Vessel</th><th>Seed</th><th>Flags</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      }
+      <div class="import-actions">
+        <button id="import-review-again" class="button subtle" type="button"><i data-lucide="arrow-left"></i><span>Back to review</span></button>
+        <button id="import-commit" class="button primary" type="button" ${accepted.length === 0 ? "disabled" : ""}>
+          <i data-lucide="database-backup"></i><span>Import ${accepted.length} record${accepted.length === 1 ? "" : "s"}</span>
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function attachImportEvents(): void {
+  app.querySelector<HTMLInputElement>("#import-file")?.addEventListener("change", handleImportFile);
+  app.querySelector<HTMLButtonElement>("#import-cancel")?.addEventListener("click", cancelImport);
+
+  const wiz = state.importWizard;
+  if (!wiz) {
+    return;
+  }
+
+  if (wiz.stage === "map") {
+    app.querySelectorAll<HTMLSelectElement>("[data-map-field]").forEach((select) => {
+      select.addEventListener("change", () => {
+        const key = select.dataset.mapField as ImportFieldKey;
+        wiz.mapping[key] = select.value === "" ? null : Number(select.value);
+      });
+    });
+    app.querySelector<HTMLButtonElement>("#import-start-review")?.addEventListener("click", startImportReview);
+  }
+
+  if (wiz.stage === "review") {
+    const form = app.querySelector<HTMLFormElement>("#import-row-form");
+    form?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      confirmImportRow(form);
+    });
+    form?.addEventListener("input", updateImportRowWarnings);
+    form?.addEventListener("change", updateImportRowWarnings);
+    app.querySelector<HTMLButtonElement>("#import-skip")?.addEventListener("click", skipImportRow);
+    app.querySelector<HTMLButtonElement>("#import-back")?.addEventListener("click", importRowBack);
+  }
+
+  if (wiz.stage === "summary") {
+    app.querySelector<HTMLButtonElement>("#import-commit")?.addEventListener("click", commitImport);
+    app.querySelector<HTMLButtonElement>("#import-review-again")?.addEventListener("click", () => {
+      wiz.stage = "review";
+      wiz.cursor = Math.max(0, wiz.rows.length - 1);
+      render();
+    });
+  }
+}
+
+async function handleImportFile(event: Event): Promise<void> {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) {
+    return;
+  }
+
+  try {
+    const grid = await parseTabularFile(file);
+    if (grid.length < 2) {
+      throw new Error("The file needs a header row plus at least one data row.");
+    }
+    const [headers, ...rows] = grid;
+    state.importWizard = {
+      stage: "map",
+      fileName: file.name,
+      headers,
+      rows,
+      mapping: autoMap(headers),
+      cursor: 0,
+      accepted: new Map(),
+      skipped: new Set(),
+      rowError: null,
+    };
+    state.notice = null;
+    render();
+  } catch (error) {
+    state.notice = { tone: "error", message: error instanceof Error ? error.message : "Could not read that file." };
+    render();
+  }
+}
+
+function startImportReview(): void {
+  const wiz = state.importWizard;
+  if (!wiz) {
+    return;
+  }
+  const missing = IMPORT_FIELDS.filter((field) => field.required && wiz.mapping[field.key] === null).map(
+    (field) => field.label,
+  );
+  if (missing.length > 0) {
+    state.notice = { tone: "error", message: `Map these required columns first: ${missing.join(", ")}.` };
+    render();
+    return;
+  }
+  wiz.stage = "review";
+  wiz.cursor = 0;
+  state.notice = null;
+  render();
+}
+
+function currentImportDraft(wiz: ImportWizardState): ImportDraft {
+  return wiz.accepted.get(wiz.cursor)?.draft ?? rowToDraft(wiz.rows[wiz.cursor], wiz.mapping);
+}
+
+function readImportRowForm(form: HTMLFormElement): ImportDraft {
+  const data = new FormData(form);
+  const text = (name: string): string => compactText(data.get(name)) ?? "";
+  return {
+    donor_identifier: text("donor_identifier"),
+    eye: (compactText(data.get("eye")) ?? "unknown") as Eye,
+    culture_name: text("culture_name"),
+    label: text("label"),
+    passage_number: text("passage_number"),
+    vessel: text("vessel"),
+    started_at: text("started_at"),
+    split_date: text("split_date"),
+    medium: text("medium"),
+    seeding_density: text("seeding_density"),
+    incubator_location: text("incubator_location"),
+    status: (compactText(data.get("status")) ?? "active") as CultureStatus,
+    source_record_type: (compactText(data.get("source_record_type")) ?? "culture_vessel") as SourceRecordType,
+    raw_source_identifier: text("raw_source_identifier"),
+    pretreatment_date: text("pretreatment_date"),
+    dissociation_date: text("dissociation_date"),
+    ground_truth_date_field: (compactText(data.get("ground_truth_date_field")) ?? "seed_date") as GroundTruthDateField,
+    conflict_resolution: text("conflict_resolution"),
+    growth_notes: text("growth_notes"),
+    source_documentation: text("source_documentation"),
+    parent_label: text("parent_label"),
+  };
+}
+
+function draftToVesselDraft(draft: ImportDraft): VesselDraft {
+  return {
+    culture_name: draft.culture_name,
+    donor_identifier: draft.donor_identifier || null,
+    eye: draft.eye,
+    label: draft.label,
+    passage_number: draft.passage_number.trim() === "" ? null : Number(draft.passage_number),
+    vessel: draft.vessel,
+    parent_batch_id: null,
+    started_at: draft.started_at || null,
+    split_date: draft.split_date || null,
+    media_change_1_date: null,
+    media_change_2_date: null,
+    media_changes: [],
+    source_record_type: draft.source_record_type,
+    raw_source_identifier: draft.raw_source_identifier || null,
+    pretreatment_date: draft.pretreatment_date || null,
+    dissociation_date: draft.dissociation_date || null,
+    ground_truth_date_field: draft.ground_truth_date_field,
+    ground_truth_date: null,
+    conflict_resolution: draft.conflict_resolution || null,
+    status: draft.status,
+  };
+}
+
+function importDraftToInput(draft: ImportDraft, sourceIndex: number): ImportVesselInput {
+  const wiz = state.importWizard;
+  const label = draft.label.trim();
+  if (!label) {
+    throw new Error("Vessel label is required.");
+  }
+  if (draft.passage_number.trim() === "") {
+    throw new Error("Passage is required.");
+  }
+  const passage = Number(draft.passage_number);
+  if (!Number.isFinite(passage) || passage < 0) {
+    throw new Error("Passage must be a whole number of 0 or more.");
+  }
+  if (!draft.vessel.trim()) {
+    throw new Error("Flask type is required.");
+  }
+  if (!draft.started_at.trim()) {
+    throw new Error("Seed date is required — confirm it against the raw line.");
+  }
+
+  return {
+    culture_name: draft.culture_name.trim() || state.cellLines[0]?.name || "Corneal endothelial culture",
+    donor_identifier: draft.donor_identifier || null,
+    eye: draft.eye,
+    label,
+    passage_number: passage,
+    vessel: draft.vessel.trim(),
+    parent_batch_id: null,
+    parent_label: draft.parent_label || null,
+    started_at: draft.started_at,
+    split_date: draft.split_date || null,
+    media_change_1_date: null,
+    media_change_2_date: null,
+    source_record_type: draft.source_record_type,
+    raw_source_identifier: draft.raw_source_identifier || null,
+    pretreatment_date: draft.pretreatment_date || null,
+    dissociation_date: draft.dissociation_date || null,
+    ground_truth_date_field: draft.ground_truth_date_field,
+    ground_truth_date: groundTruthDate({
+      started_at: draft.started_at,
+      pretreatment_date: draft.pretreatment_date || null,
+      dissociation_date: draft.dissociation_date || null,
+      ground_truth_date_field: draft.ground_truth_date_field,
+    }),
+    conflict_resolution: draft.conflict_resolution || null,
+    raw_intake_json: wiz
+      ? buildImportRawIntake(wiz.fileName, wiz.headers, wiz.rows[sourceIndex], wiz.mapping, sourceIndex)
+      : "{}",
+    medium: draft.medium || null,
+    seeding_density: draft.seeding_density || null,
+    incubator_location: draft.incubator_location || null,
+    status: draft.status,
+    growth_notes: draft.growth_notes || null,
+    source_documentation: draft.source_documentation || null,
+  };
+}
+
+function isPossibleDuplicate(draft: ImportDraft): boolean {
+  const sourceId = normalizeSourceId(draft.raw_source_identifier || draft.donor_identifier);
+  if (!sourceId) {
+    return false;
+  }
+  const passage = draft.passage_number.trim() === "" ? null : Number(draft.passage_number);
+  return state.batches.some(
+    (batch) =>
+      normalizeSourceId(batch.raw_source_identifier ?? batch.donor_identifier) === sourceId &&
+      (batch.eye ?? "unknown") === draft.eye &&
+      batch.passage_number === passage,
+  );
+}
+
+function importPeers(excludeSourceIndex: number): WarningPeer[] {
+  const pseudo: WarningPeer[] = [];
+  state.importWizard?.accepted.forEach((row) => {
+    if (row.sourceIndex === excludeSourceIndex) {
+      return;
+    }
+    pseudo.push({
+      id: -(row.sourceIndex + 1000),
+      label: row.input.label,
+      passage_number: row.input.passage_number,
+      started_at: row.input.started_at,
+      donor_identifier: row.input.donor_identifier,
+      eye: row.input.eye,
+      raw_source_identifier: row.input.raw_source_identifier,
+      source_record_type: row.input.source_record_type,
+      dissociation_date: row.input.dissociation_date,
+    });
+  });
+  return [...state.batches, ...pseudo];
+}
+
+function confirmImportRow(form: HTMLFormElement): void {
+  const wiz = state.importWizard;
+  if (!wiz) {
+    return;
+  }
+  try {
+    const draft = readImportRowForm(form);
+    const input = importDraftToInput(draft, wiz.cursor);
+    const warnings = buildDraftWarnings(draftToVesselDraft(draft), importPeers(wiz.cursor));
+    wiz.accepted.set(wiz.cursor, {
+      sourceIndex: wiz.cursor,
+      input,
+      draft,
+      warnings,
+      possibleDuplicate: isPossibleDuplicate(draft),
+    });
+    wiz.skipped.delete(wiz.cursor);
+    wiz.rowError = null;
+    advanceImportCursor();
+  } catch (error) {
+    wiz.rowError = error instanceof Error ? error.message : "This row is incomplete.";
+    render();
+  }
+}
+
+function advanceImportCursor(): void {
+  const wiz = state.importWizard;
+  if (!wiz) {
+    return;
+  }
+  if (wiz.cursor >= wiz.rows.length - 1) {
+    wiz.stage = "summary";
+  } else {
+    wiz.cursor += 1;
+  }
+  render();
+}
+
+function skipImportRow(): void {
+  const wiz = state.importWizard;
+  if (!wiz) {
+    return;
+  }
+  wiz.accepted.delete(wiz.cursor);
+  wiz.skipped.add(wiz.cursor);
+  wiz.rowError = null;
+  advanceImportCursor();
+}
+
+function importRowBack(): void {
+  const wiz = state.importWizard;
+  if (!wiz || wiz.cursor === 0) {
+    return;
+  }
+  wiz.cursor -= 1;
+  wiz.rowError = null;
+  render();
+}
+
+function updateImportRowWarnings(): void {
+  const wiz = state.importWizard;
+  const form = app.querySelector<HTMLFormElement>("#import-row-form");
+  const target = app.querySelector<HTMLDivElement>("#import-row-warnings");
+  if (!wiz || !form || !target) {
+    return;
+  }
+  const draft = readImportRowForm(form);
+  const warnings = buildDraftWarnings(draftToVesselDraft(draft), importPeers(wiz.cursor));
+  target.innerHTML = renderImportRowFlags(warnings, isPossibleDuplicate(draft), draft);
+  createIcons({ icons });
+}
+
+async function commitImport(): Promise<void> {
+  const wiz = state.importWizard;
+  if (!wiz) {
+    return;
+  }
+  const inputs = Array.from(wiz.accepted.values())
+    .sort((a, b) => a.sourceIndex - b.sourceIndex)
+    .map((row) => row.input);
+  if (inputs.length === 0) {
+    state.notice = { tone: "info", message: "No rows were confirmed for import." };
+    render();
+    return;
+  }
+  await runMutation(`Imported ${inputs.length} record${inputs.length === 1 ? "" : "s"}.`, async () => {
+    const ids = await store.importVessels(inputs);
+    state.importWizard = null;
+    state.selectedBatchId = ids[0] ?? state.selectedBatchId;
+  });
+}
+
+function cancelImport(): void {
+  state.importWizard = null;
+  state.notice = null;
+  render();
 }
 
 void boot();

@@ -10,6 +10,7 @@ import type {
   CultureBatchView,
   CultureEvent,
   CultureStore,
+  ImportVesselInput,
 } from "./types";
 import { sha256 } from "./utils";
 
@@ -123,6 +124,46 @@ function normalizeBatch(batch: CultureBatch): CultureBatch {
   };
 }
 
+interface ParentCandidate {
+  id: number;
+  label: string;
+  donor_identifier: string | null;
+  eye: string | null;
+}
+
+// Resolve an imported row's `parent_label` to a parent batch id by exact label match
+// (case-insensitive) among the candidate batches. A single match wins outright; when a
+// label is shared, it is disambiguated by eye + donor (a blank donor on either side is
+// treated as compatible). Anything ambiguous or unmatched returns null (left unlinked).
+function matchParentId(
+  parentLabel: string,
+  child: { donor_identifier: string | null; eye: string | null },
+  childId: number,
+  candidates: ParentCandidate[],
+): number | null {
+  const target = parentLabel.trim().toLowerCase();
+  if (!target) {
+    return null;
+  }
+
+  const sameLabel = candidates.filter((c) => c.id !== childId && c.label.trim().toLowerCase() === target);
+  if (sameLabel.length === 0) {
+    return null;
+  }
+  if (sameLabel.length === 1) {
+    return sameLabel[0].id;
+  }
+
+  const childDonor = (child.donor_identifier ?? "").toLowerCase();
+  const childEye = child.eye ?? "unknown";
+  const narrowed = sameLabel.filter((c) => {
+    const donor = (c.donor_identifier ?? "").toLowerCase();
+    const donorOk = childDonor === "" || donor === "" || donor === childDonor;
+    return donorOk && (c.eye ?? "unknown") === childEye;
+  });
+  return narrowed.length === 1 ? narrowed[0].id : null;
+}
+
 export async function createCultureStore(): Promise<CultureStore> {
   if (!isTauriRuntime()) {
     const store = new MemoryCultureStore();
@@ -207,73 +248,111 @@ class SqlCultureStore implements CultureStore {
     let newId = 0;
 
     await this.transaction(async () => {
-      const cellLineId = await this.resolveCellLine(input.culture_name);
-      await this.execute(
-        `INSERT INTO culture_batches (
-          cell_line_id,
-          label,
-          passage_number,
-          vessel,
-          medium,
-          seeding_density,
-          incubator_location,
-          status,
-          started_at,
-          last_event_at,
-          notes,
-          donor_identifier,
-          eye,
-          parent_batch_id,
-          split_date,
-          media_change_1_date,
-          media_change_2_date,
-          source_record_type,
-          raw_source_identifier,
-          pretreatment_date,
-          dissociation_date,
-          ground_truth_date_field,
-          ground_truth_date,
-          conflict_resolution,
-          raw_intake_json,
-          growth_notes,
-          source_documentation
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          cellLineId,
-          input.label,
-          input.passage_number,
-          input.vessel,
-          input.medium,
-          input.seeding_density,
-          input.incubator_location,
-          input.status,
-          input.started_at,
-          input.started_at,
-          input.growth_notes,
-          input.donor_identifier,
-          input.eye,
-          input.parent_batch_id,
-          input.split_date,
-          input.media_change_1_date,
-          input.media_change_2_date,
-          input.source_record_type,
-          input.raw_source_identifier,
-          input.pretreatment_date,
-          input.dissociation_date,
-          input.ground_truth_date_field,
-          input.ground_truth_date,
-          input.conflict_resolution,
-          input.raw_intake_json,
-          input.growth_notes,
-          input.source_documentation,
-        ],
-      );
-      newId = await this.lastInsertId();
+      newId = await this.insertVesselRow(input);
       await this.writeAudit("culture_vessel", newId, "CREATE", input);
     });
 
     await this.saveSnapshot("Auto snapshot after vessel intake");
     return newId;
+  }
+
+  async importVessels(inputs: ImportVesselInput[]): Promise<number[]> {
+    const ids: number[] = [];
+
+    await this.transaction(async () => {
+      for (const input of inputs) {
+        ids.push(await this.insertVesselRow(input));
+      }
+      await this.resolveImportParents(inputs, ids);
+      await this.writeAudit("database", null, "IMPORT", {
+        count: ids.length,
+        labels: inputs.map((input) => input.label),
+      });
+    });
+
+    await this.saveSnapshot("Auto snapshot after import");
+    return ids;
+  }
+
+  private async insertVesselRow(input: CreateVesselInput): Promise<number> {
+    const cellLineId = await this.resolveCellLine(input.culture_name);
+    await this.execute(
+      `INSERT INTO culture_batches (
+        cell_line_id,
+        label,
+        passage_number,
+        vessel,
+        medium,
+        seeding_density,
+        incubator_location,
+        status,
+        started_at,
+        last_event_at,
+        notes,
+        donor_identifier,
+        eye,
+        parent_batch_id,
+        split_date,
+        media_change_1_date,
+        media_change_2_date,
+        source_record_type,
+        raw_source_identifier,
+        pretreatment_date,
+        dissociation_date,
+        ground_truth_date_field,
+        ground_truth_date,
+        conflict_resolution,
+        raw_intake_json,
+        growth_notes,
+        source_documentation
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        cellLineId,
+        input.label,
+        input.passage_number,
+        input.vessel,
+        input.medium,
+        input.seeding_density,
+        input.incubator_location,
+        input.status,
+        input.started_at,
+        input.started_at,
+        input.growth_notes,
+        input.donor_identifier,
+        input.eye,
+        input.parent_batch_id,
+        input.split_date,
+        input.media_change_1_date,
+        input.media_change_2_date,
+        input.source_record_type,
+        input.raw_source_identifier,
+        input.pretreatment_date,
+        input.dissociation_date,
+        input.ground_truth_date_field,
+        input.ground_truth_date,
+        input.conflict_resolution,
+        input.raw_intake_json,
+        input.growth_notes,
+        input.source_documentation,
+      ],
+    );
+    return this.lastInsertId();
+  }
+
+  private async resolveImportParents(inputs: ImportVesselInput[], ids: number[]): Promise<void> {
+    const candidates = await this.select<ParentCandidate[]>(
+      "SELECT id, label, donor_identifier, eye FROM culture_batches WHERE deleted_at IS NULL",
+    );
+    for (let index = 0; index < inputs.length; index += 1) {
+      const input = inputs[index];
+      if (!input.parent_label || !input.parent_label.trim()) {
+        continue;
+      }
+      const parentId = matchParentId(input.parent_label, input, ids[index], candidates);
+      if (parentId !== null) {
+        await this.execute("UPDATE culture_batches SET parent_batch_id = ? WHERE id = ?", [parentId, ids[index]]);
+      }
+    }
   }
 
   async recordEvent(input: CreateEventInput): Promise<void> {
@@ -646,6 +725,47 @@ class MemoryCultureStore implements CultureStore {
   }
 
   async createVessel(input: CreateVesselInput): Promise<number> {
+    const id = this.insertBatchRow(input);
+    this.audit("culture_vessel", id, "CREATE", input);
+    await this.saveSnapshot("Auto snapshot after vessel intake");
+    await this.persist();
+    return id;
+  }
+
+  async importVessels(inputs: ImportVesselInput[]): Promise<number[]> {
+    const ids = inputs.map((input) => this.insertBatchRow(input));
+
+    // Snapshot of candidates taken after all inserts, so a parent can be another
+    // just-imported row.
+    const candidates: ParentCandidate[] = this.state.cultureBatches
+      .filter((batch) => batch.deleted_at === null)
+      .map((batch) => ({
+        id: batch.id,
+        label: batch.label,
+        donor_identifier: batch.donor_identifier,
+        eye: batch.eye,
+      }));
+
+    inputs.forEach((input, index) => {
+      if (!input.parent_label || !input.parent_label.trim()) {
+        return;
+      }
+      const parentId = matchParentId(input.parent_label, input, ids[index], candidates);
+      if (parentId !== null) {
+        const batch = this.state.cultureBatches.find((item) => item.id === ids[index]);
+        if (batch) {
+          batch.parent_batch_id = parentId;
+        }
+      }
+    });
+
+    this.audit("database", null, "IMPORT", { count: ids.length, labels: inputs.map((input) => input.label) });
+    await this.saveSnapshot("Auto snapshot after import");
+    await this.persist();
+    return ids;
+  }
+
+  private insertBatchRow(input: CreateVesselInput): number {
     const cellLineId = this.resolveCellLine(input.culture_name);
     const row: CultureBatch = {
       id: this.state.nextBatchId++,
@@ -682,9 +802,6 @@ class MemoryCultureStore implements CultureStore {
     };
 
     this.state.cultureBatches.push(row);
-    this.audit("culture_vessel", row.id, "CREATE", input);
-    await this.saveSnapshot("Auto snapshot after vessel intake");
-    await this.persist();
     return row.id;
   }
 
