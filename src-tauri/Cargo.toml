@@ -1,6 +1,6 @@
 [package]
 name = "cell-culture-recorder"
-version = "0.1.3"
+version = "0.1.4"
 description = "Native cell culture record keeper"
 authors = ["zhuojian"]
 edition = "2021"
