@@ -11,6 +11,7 @@ import type {
   CultureEvent,
   CultureStore,
   ImportVesselInput,
+  VesselPatch,
 } from "./types";
 import { sha256 } from "./utils";
 
@@ -254,6 +255,68 @@ class SqlCultureStore implements CultureStore {
 
     await this.saveSnapshot("Auto snapshot after vessel intake");
     return newId;
+  }
+
+  async updateVessel(id: number, patch: VesselPatch): Promise<void> {
+    await this.transaction(async () => {
+      const cellLineId = await this.resolveCellLine(patch.culture_name);
+      await this.execute(
+        `UPDATE culture_batches SET
+           cell_line_id = ?,
+           label = ?,
+           passage_number = ?,
+           vessel = ?,
+           medium = ?,
+           seeding_density = ?,
+           incubator_location = ?,
+           status = ?,
+           started_at = ?,
+           notes = ?,
+           donor_identifier = ?,
+           eye = ?,
+           parent_batch_id = ?,
+           split_date = ?,
+           source_record_type = ?,
+           raw_source_identifier = ?,
+           pretreatment_date = ?,
+           dissociation_date = ?,
+           ground_truth_date_field = ?,
+           ground_truth_date = ?,
+           conflict_resolution = ?,
+           growth_notes = ?,
+           source_documentation = ?
+         WHERE id = ?`,
+        [
+          cellLineId,
+          patch.label,
+          patch.passage_number,
+          patch.vessel,
+          patch.medium,
+          patch.seeding_density,
+          patch.incubator_location,
+          patch.status,
+          patch.started_at,
+          patch.growth_notes,
+          patch.donor_identifier,
+          patch.eye,
+          patch.parent_batch_id,
+          patch.split_date,
+          patch.source_record_type,
+          patch.raw_source_identifier,
+          patch.pretreatment_date,
+          patch.dissociation_date,
+          patch.ground_truth_date_field,
+          patch.ground_truth_date,
+          patch.conflict_resolution,
+          patch.growth_notes,
+          patch.source_documentation,
+          id,
+        ],
+      );
+      await this.writeAudit("culture_vessel", id, "UPDATE", patch);
+    });
+
+    await this.saveSnapshot("Auto snapshot after vessel edit");
   }
 
   async importVessels(inputs: ImportVesselInput[]): Promise<number[]> {
@@ -730,6 +793,41 @@ class MemoryCultureStore implements CultureStore {
     await this.saveSnapshot("Auto snapshot after vessel intake");
     await this.persist();
     return id;
+  }
+
+  async updateVessel(id: number, patch: VesselPatch): Promise<void> {
+    const batch = this.state.cultureBatches.find((item) => item.id === id);
+    if (!batch) {
+      throw new Error("Vessel not found.");
+    }
+    batch.cell_line_id = this.resolveCellLine(patch.culture_name);
+    batch.label = patch.label;
+    batch.passage_number = patch.passage_number;
+    batch.vessel = patch.vessel;
+    batch.medium = patch.medium;
+    batch.seeding_density = patch.seeding_density;
+    batch.incubator_location = patch.incubator_location;
+    batch.status = patch.status;
+    batch.started_at = patch.started_at;
+    batch.notes = patch.growth_notes;
+    batch.donor_identifier = patch.donor_identifier;
+    batch.eye = patch.eye;
+    batch.parent_batch_id = patch.parent_batch_id;
+    batch.split_date = patch.split_date;
+    batch.source_record_type = patch.source_record_type;
+    batch.raw_source_identifier = patch.raw_source_identifier;
+    batch.pretreatment_date = patch.pretreatment_date;
+    batch.dissociation_date = patch.dissociation_date;
+    batch.ground_truth_date_field = patch.ground_truth_date_field;
+    batch.ground_truth_date = patch.ground_truth_date;
+    batch.conflict_resolution = patch.conflict_resolution;
+    batch.growth_notes = patch.growth_notes;
+    batch.source_documentation = patch.source_documentation;
+    batch.updated_at = timestamp();
+
+    this.audit("culture_vessel", id, "UPDATE", patch);
+    await this.saveSnapshot("Auto snapshot after vessel edit");
+    await this.persist();
   }
 
   async importVessels(inputs: ImportVesselInput[]): Promise<number[]> {

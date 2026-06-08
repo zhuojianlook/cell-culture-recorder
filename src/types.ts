@@ -137,6 +137,10 @@ export interface ImportVesselInput extends CreateVesselInput {
   parent_label: string | null;
 }
 
+// The editable columns the grid can patch on an existing vessel (everything except the
+// immutable provenance snapshot and the legacy media-change date columns).
+export type VesselPatch = Omit<CreateVesselInput, "raw_intake_json" | "media_change_1_date" | "media_change_2_date">;
+
 export interface CreateEventInput {
   batch_id: number;
   event_type: EventType;
@@ -174,6 +178,7 @@ export interface CultureStore {
   listAuditEntries(limit?: number): Promise<AuditEntry[]>;
   listBackups(limit?: number): Promise<BackupSnapshot[]>;
   createVessel(input: CreateVesselInput): Promise<number>;
+  updateVessel(id: number, patch: VesselPatch): Promise<void>;
   importVessels(inputs: ImportVesselInput[]): Promise<number[]>;
   recordEvent(input: CreateEventInput): Promise<void>;
   exportBackup(label: string): Promise<BackupPackage>;
