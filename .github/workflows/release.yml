@@ -60,10 +60,12 @@ jobs:
           releaseBody: |
             Automated build for __VERSION__ (Apple Silicon, unsigned/ad-hoc).
 
-            First install: download the `.app.tar.gz`, double-click to extract, move
-            the app to /Applications, then right-click -> Open once to clear Gatekeeper
-            (or run `xattr -dr com.apple.quarantine "/Applications/Cell Culture Recorder.app"`).
-            After that, use "Check updates" inside the app to pull future versions.
+            First install: download the `.dmg`, open it, and drag **Cell Culture Recorder**
+            into Applications. On first launch, right-click the app -> Open once to clear
+            Gatekeeper (or run
+            `xattr -dr com.apple.quarantine "/Applications/Cell Culture Recorder.app"`).
+            After that, use "Check updates" inside the app to pull future versions
+            (delivered via the `.app.tar.gz` updater bundle).
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
