@@ -4,6 +4,13 @@ name: Release
 # pushed (e.g. `git tag v0.1.4 && git push origin v0.1.4`). The in-app updater
 # reads the `latest.json` asset from the latest release, so each tagged build is
 # delivered to already-installed copies via "Check updates".
+#
+# Resilience: macOS DMG bundling (bundle_dmg.sh / Finder AppleScript) is
+# intermittently flaky on GitHub runners. That failure happens during the BUILD,
+# before any release is created, so a failed attempt leaves nothing behind. We
+# therefore run the build-and-publish step up to 3 times — each retry only fires
+# if the previous attempt failed. The Rust cache makes retries fast, and three
+# independent attempts take the ~20% per-attempt flake to well under 1%.
 on:
   push:
     tags:
@@ -22,6 +29,12 @@ jobs:
     # Apple Silicon runner -> aarch64 build, matching the existing releases and
     # the developer's test machine.
     runs-on: macos-14
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Minisign key for the Tauri updater. Must match the pubkey baked into
+      # tauri.conf.json, or installed apps will reject the update.
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,28 +57,55 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build and publish release
+      - name: Build and publish release (attempt 1)
+        id: release1
+        continue-on-error: true
         uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Minisign key for the Tauri updater. Must match the pubkey baked into
-          # tauri.conf.json, or installed apps will reject the update.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target aarch64-apple-darwin
           # On a tag push, github.ref_name is the tag; on manual dispatch, use the input.
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: "Cell Culture Recorder __VERSION__"
           releaseBody: |
-            Automated build for __VERSION__ (Apple Silicon, unsigned/ad-hoc).
+            Automated Apple Silicon build for __VERSION__. First install: open the
+            `.dmg` and drag **Cell Culture Recorder** into Applications (first launch:
+            right-click the app -> Open once to clear Gatekeeper). After that, the app
+            checks for updates on launch and installs them in place.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
 
-            First install: download the `.dmg`, open it, and drag **Cell Culture Recorder**
-            into Applications. On first launch, right-click the app -> Open once to clear
-            Gatekeeper (or run
-            `xattr -dr com.apple.quarantine "/Applications/Cell Culture Recorder.app"`).
-            After that, use "Check updates" inside the app to pull future versions
-            (delivered via the `.app.tar.gz` updater bundle).
+      - name: Build and publish release (attempt 2)
+        id: release2
+        if: steps.release1.outcome == 'failure'
+        continue-on-error: true
+        uses: tauri-apps/tauri-action@v0
+        with:
+          args: --target aarch64-apple-darwin
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: "Cell Culture Recorder __VERSION__"
+          releaseBody: |
+            Automated Apple Silicon build for __VERSION__. First install: open the
+            `.dmg` and drag **Cell Culture Recorder** into Applications (first launch:
+            right-click the app -> Open once to clear Gatekeeper). After that, the app
+            checks for updates on launch and installs them in place.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+
+      - name: Build and publish release (attempt 3)
+        id: release3
+        if: steps.release1.outcome == 'failure' && steps.release2.outcome == 'failure'
+        uses: tauri-apps/tauri-action@v0
+        with:
+          args: --target aarch64-apple-darwin
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: "Cell Culture Recorder __VERSION__"
+          releaseBody: |
+            Automated Apple Silicon build for __VERSION__. First install: open the
+            `.dmg` and drag **Cell Culture Recorder** into Applications (first launch:
+            right-click the app -> Open once to clear Gatekeeper). After that, the app
+            checks for updates on launch and installs them in place.
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
