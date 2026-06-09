@@ -1240,3 +1240,42 @@ textarea.grid-input {
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button { opacity: 1; filter: invert(0.8); height: auto; }
+
+/* In-app update banner */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent-soft);
+}
+
+.update-banner-text {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.update-banner-text > svg {
+  color: var(--accent-strong);
+}
+
+.update-banner-text strong {
+  display: block;
+}
+
+.update-banner-text span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.update-banner-actions {
+  display: flex;
+  gap: 10px;
+}

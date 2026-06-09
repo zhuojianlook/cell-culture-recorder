@@ -158,6 +158,11 @@ const state: AppState = {
   grid: { expanded: new Set(), flaggedOnly: false, drafts: [] },
 };
 
+// Holds an available app update (Tauri only) so the banner's Install button can act on it
+// without re-checking. Auto-populated on launch; the manual "Check updates" button also sets it.
+let availableUpdate: Awaited<ReturnType<typeof check>> = null;
+let updateBannerDismissed = false;
+
 async function boot(): Promise<void> {
   renderLoading();
 
@@ -165,6 +170,7 @@ async function boot(): Promise<void> {
     store = await createCultureStore();
     state.mode = store.mode;
     await refreshData();
+    void autoCheckForUpdates();
   } catch (error) {
     state.notice = {
       tone: "error",
@@ -277,6 +283,7 @@ function render(): void {
           </div>
         </header>
 
+        ${renderUpdateBanner()}
         ${renderNotice()}
         ${renderDatalists()}
 
@@ -354,6 +361,27 @@ function render(): void {
 
   attachEvents();
   createIcons({ icons });
+}
+
+function renderUpdateBanner(): string {
+  if (!availableUpdate || updateBannerDismissed) {
+    return "";
+  }
+  return `
+    <div class="update-banner" role="status">
+      <div class="update-banner-text">
+        <i data-lucide="sparkles"></i>
+        <div>
+          <strong>Update available — v${escapeHtml(availableUpdate.version)}</strong>
+          <span>Install now to get the latest. The app downloads it and restarts automatically.</span>
+        </div>
+      </div>
+      <div class="update-banner-actions">
+        <button id="update-later" class="button subtle" type="button"><span>Later</span></button>
+        <button id="update-install" class="button primary" type="button"><i data-lucide="download"></i><span>Install &amp; restart</span></button>
+      </div>
+    </div>
+  `;
 }
 
 function renderNotice(): string {
@@ -707,6 +735,11 @@ function attachEvents(): void {
   app.querySelector<HTMLButtonElement>("#export-excel")?.addEventListener("click", exportExcel);
   app.querySelector<HTMLButtonElement>("#check-updates-top")?.addEventListener("click", checkForUpdates);
   app.querySelector<HTMLButtonElement>("#check-updates")?.addEventListener("click", checkForUpdates);
+  app.querySelector<HTMLButtonElement>("#update-install")?.addEventListener("click", installAvailableUpdate);
+  app.querySelector<HTMLButtonElement>("#update-later")?.addEventListener("click", () => {
+    updateBannerDismissed = true;
+    render();
+  });
   app.querySelector<HTMLInputElement>("#restore-file")?.addEventListener("change", restoreFromFile);
 
   app.querySelector<HTMLButtonElement>("#add-vessel")?.addEventListener("click", addVesselRow);
@@ -891,36 +924,68 @@ async function exportExcel(): Promise<void> {
   render();
 }
 
+// Silent check on launch — if an update is waiting, surface the banner automatically so
+// the user can update locally with one click (no need to find a button).
+async function autoCheckForUpdates(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  try {
+    const update = await check({ timeout: 15000 });
+    if (update) {
+      availableUpdate = update;
+      updateBannerDismissed = false;
+      render();
+    }
+  } catch {
+    // Stay quiet on launch; the manual "Check updates" button surfaces any error.
+  }
+}
+
+// Manual "Check updates" button — same result, but reports up-to-date / errors.
 async function checkForUpdates(): Promise<void> {
   if (!isTauriRuntime()) {
     state.notice = {
       tone: "info",
-      message: "In-app updates are available in the native Tauri app, not the browser preview.",
+      message: "In-app updates run in the installed app, not the browser preview.",
     };
     render();
     return;
   }
 
-  state.notice = { tone: "info", message: "Checking for signed app updates..." };
+  state.notice = { tone: "info", message: "Checking for updates..." };
   render();
 
   try {
     const update = await check({ timeout: 15000 });
     if (!update) {
+      availableUpdate = null;
       state.notice = { tone: "success", message: "Cell Culture Recorder is up to date." };
       render();
       return;
     }
+    availableUpdate = update;
+    updateBannerDismissed = false;
+    state.notice = { tone: "info", message: `Update ${update.version} is available.` };
+    render();
+  } catch (error) {
+    state.notice = {
+      tone: "error",
+      message: error instanceof Error ? error.message : "Could not check for updates.",
+    };
+    render();
+  }
+}
 
-    const approved = window.confirm(
-      `Install Cell Culture Recorder ${update.version}? The app will restart after the update is installed.`,
-    );
-    if (!approved) {
-      state.notice = { tone: "info", message: `Update ${update.version} is available but was not installed.` };
-      render();
-      return;
-    }
+// Download + install the pending update, showing progress, then relaunch.
+async function installAvailableUpdate(): Promise<void> {
+  const update = availableUpdate;
+  if (!update) {
+    return;
+  }
+  updateBannerDismissed = true; // hide the banner; progress shows in the notice
 
+  try {
     let downloaded = 0;
     let contentLength: number | undefined;
     await update.downloadAndInstall((event) => {
@@ -948,9 +1013,10 @@ async function checkForUpdates(): Promise<void> {
     render();
     await relaunch();
   } catch (error) {
+    updateBannerDismissed = false;
     state.notice = {
       tone: "error",
-      message: error instanceof Error ? error.message : "Could not check for updates.",
+      message: error instanceof Error ? error.message : "Could not install the update.",
     };
     render();
   }
