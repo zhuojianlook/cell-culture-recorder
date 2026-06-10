@@ -75,7 +75,10 @@
     <div class="dashboard__body">
       <div class="dashboard__toolbar">
         <h2>My Projects</h2>
-        <button id="dashboardNewProject" type="button" class="btn btn--accent">+ New Project</button>
+        <div style="display:flex;gap:10px;align-items:center">
+          <button id="openCultureRecorder" type="button" class="btn" onclick="window.location.href='ccr/index.html'" title="Open the Cell Culture Recorder">🧫 Cell Culture Recorder</button>
+          <button id="dashboardNewProject" type="button" class="btn btn--accent">+ New Project</button>
+        </div>
       </div>
       <div id="dashboardProjectGrid" class="dashboard__grid"></div>
     </div>

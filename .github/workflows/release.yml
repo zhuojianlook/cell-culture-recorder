@@ -57,6 +57,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Build the Cell Culture Recorder sub-app (Vite, relative base) into
+      # web/ccr/ so the integrated frontend can navigate to it. Must run before
+      # tauri-action bundles frontendDist (../web).
+      - name: Build Cell Culture Recorder bundle (web/ccr)
+        run: |
+          npm run build
+          rm -rf web/ccr && mkdir -p web/ccr && cp -r dist/* web/ccr/
+
       # Compile the WetlabPlanner Express server into the bundled `api-server`
       # sidecar (Node SEA single binary). Must run before tauri-action so the
       # binary exists in src-tauri/binaries/ when the app is bundled.

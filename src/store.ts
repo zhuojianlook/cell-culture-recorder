@@ -1,4 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
+import { invoke } from "@tauri-apps/api/core";
 import type {
   AuditEntry,
   BackupPackage,
@@ -166,18 +167,162 @@ function matchParentId(
 }
 
 export async function createCultureStore(): Promise<CultureStore> {
-  if (!isTauriRuntime()) {
+  // ?apistore forces the server-backed store in a plain browser (dev preview of
+  // the integrated path); otherwise the browser uses the in-memory preview store.
+  const forceApi =
+    typeof window !== "undefined" && /[?&]apistore\b/.test(window.location.search);
+
+  if (!isTauriRuntime() && !forceApi) {
     const store = new MemoryCultureStore();
     await store.initialize();
     return store;
   }
 
-  const store = new SqlCultureStore();
+  // Integrated WetLab Planner build: culture data lives in the bundled server's
+  // unified file DB, reached through the Rust proxy_request command (or a
+  // same-origin fetch in the browser). The legacy SqlCultureStore — direct
+  // tauri-plugin-sql — is kept exported for reference.
+  const store = new ApiCultureStore();
   await store.initialize();
   return store;
 }
 
-class SqlCultureStore implements CultureStore {
+function tauriInvoke(): typeof invoke | null {
+  const g = window as unknown as { __TAURI_INTERNALS__?: unknown };
+  return g.__TAURI_INTERNALS__ ? invoke : null;
+}
+
+// Talks to the bundled WetLab server (/api/culture/*). In the Tauri shell it
+// goes through the Rust proxy_request command (which returns a {status, body}
+// envelope as a string); in a plain browser it falls back to a same-origin
+// fetch, so the grid also works in the dev preview.
+async function cultureApi<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const inv = tauriInvoke();
+  let status = 0;
+  let data: unknown = null;
+
+  if (inv) {
+    const text = await inv<string>("proxy_request", {
+      method,
+      path,
+      body: body == null ? null : JSON.stringify(body),
+    });
+    let envelope: { status?: number; body?: string } = {};
+    try {
+      envelope = JSON.parse(text);
+    } catch {
+      throw new Error("Bad response from server.");
+    }
+    status = Number(envelope.status) || 0;
+    if (envelope.body) {
+      try {
+        data = JSON.parse(envelope.body);
+      } catch {
+        data = envelope.body;
+      }
+    }
+  } else {
+    const res = await fetch(path, {
+      method,
+      headers: body == null ? undefined : { "Content-Type": "application/json" },
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    status = res.status;
+    const raw = await res.text();
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = raw;
+      }
+    }
+  }
+
+  if (status < 200 || status >= 300) {
+    const msg =
+      data && typeof data === "object" && "error" in data
+        ? String((data as Record<string, unknown>).error)
+        : `Request failed (${status}).`;
+    throw new Error(msg);
+  }
+  return data as T;
+}
+
+class ApiCultureStore implements CultureStore {
+  readonly mode = "tauri-sql" as const;
+
+  async initialize(): Promise<void> {
+    // Tolerate a slow sidecar start — the first real call will retry naturally.
+    await cultureApi<unknown>("GET", "/api/culture/cell-lines").catch(() => undefined);
+  }
+
+  async listCellLines(): Promise<CellLine[]> {
+    const res = await cultureApi<{ cellLines: CellLine[] }>("GET", "/api/culture/cell-lines");
+    return res.cellLines;
+  }
+
+  async listBatches(): Promise<CultureBatchView[]> {
+    const res = await cultureApi<{ batches: CultureBatchView[] }>("GET", "/api/culture/batches");
+    return res.batches;
+  }
+
+  async listEvents(batchId?: number): Promise<CultureEvent[]> {
+    const q = batchId ? `?batchId=${batchId}` : "";
+    const res = await cultureApi<{ events: CultureEvent[] }>("GET", `/api/culture/events${q}`);
+    return res.events;
+  }
+
+  async listAuditEntries(_limit?: number): Promise<AuditEntry[]> {
+    return [];
+  }
+
+  async listBackups(_limit?: number): Promise<BackupSnapshot[]> {
+    return [];
+  }
+
+  async createVessel(input: CreateVesselInput): Promise<number> {
+    const res = await cultureApi<{ id: number }>("POST", "/api/culture/vessels", input);
+    return res.id;
+  }
+
+  async updateVessel(id: number, patch: VesselPatch): Promise<void> {
+    await cultureApi<unknown>("PATCH", `/api/culture/vessels/${id}`, patch);
+  }
+
+  async importVessels(inputs: ImportVesselInput[]): Promise<number[]> {
+    const res = await cultureApi<{ ids: number[] }>("POST", "/api/culture/import", { vessels: inputs });
+    return res.ids;
+  }
+
+  async recordEvent(input: CreateEventInput): Promise<void> {
+    await cultureApi<unknown>("POST", "/api/culture/events", input);
+  }
+
+  async exportBackup(_label: string): Promise<BackupPackage> {
+    const cellLines = await this.listCellLines();
+    const batches = await this.listBatches();
+    const events = await this.listEvents();
+    const rawBatches = batches.map((b) => {
+      const rest = { ...b } as Partial<CultureBatchView>;
+      delete rest.cell_line_name;
+      delete rest.species;
+      delete rest.parent_label;
+      delete rest.child_count;
+      return normalizeBatch(rest as CultureBatch);
+    });
+    return buildBackupPackage(cellLines, rawBatches, events, []);
+  }
+
+  async restoreBackup(pkg: BackupPackage): Promise<void> {
+    await assertValidBackup(pkg);
+    await cultureApi<unknown>("POST", "/api/culture/restore", { data: pkg.data });
+  }
+}
+
+// Legacy direct-SQLite store, superseded by ApiCultureStore in the integrated
+// build. Exported (rather than deleted) so it stays available as a reference /
+// fallback without tripping noUnusedLocals.
+export class SqlCultureStore implements CultureStore {
   readonly mode = "tauri-sql" as const;
 
   private db: SqlDatabase | null = null;

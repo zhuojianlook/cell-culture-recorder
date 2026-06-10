@@ -219,6 +219,9 @@ function render(): void {
   app.innerHTML = `
     <div class="app-shell">
       <aside class="sidebar">
+        <a href="../index.html" class="back-to-planner" style="display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:9px 11px;border-radius:9px;border:1px solid rgba(148,163,184,.25);color:inherit;text-decoration:none;font-size:13px;font-weight:600">
+          <i data-lucide="arrow-left"></i><span>WetLab Planner</span>
+        </a>
         <div class="brand">
           <div class="brand-mark"><i data-lucide="microscope"></i></div>
           <div>

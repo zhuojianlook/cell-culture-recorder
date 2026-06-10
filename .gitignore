@@ -1,5 +1,7 @@
 node_modules
 dist
+# Cell Culture Recorder sub-app bundle — built into web/ccr by CI (and locally).
+web/ccr
 src-tauri/target
 # Bundled Node sidecar binary (~86 MB) — built by scripts/build-sidecar.sh in CI.
 src-tauri/binaries/

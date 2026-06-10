@@ -62,7 +62,15 @@ const DEFAULT_DB = Object.freeze({
   tasks: [],
   syncJobs: [],
   projectStates: [],
-  billingAccounts: []
+  billingAccounts: [],
+  // Cell Culture Recorder collections (Phase 2 unified model). Single shared
+  // dataset for the local lab, matching standalone CCR. counters give the next
+  // auto-increment id per collection.
+  cellLines: [],
+  cultureBatches: [],
+  cultureEvents: [],
+  cultureAudit: [],
+  cultureCounters: { cellLine: 1, batch: 1, event: 1, audit: 1 }
 });
 
 const DB_MODE = resolveDbMode();
@@ -571,7 +579,20 @@ function normalizeDbShape(parsed) {
     tasks: Array.isArray(source.tasks) ? source.tasks : [],
     syncJobs: Array.isArray(source.syncJobs) ? source.syncJobs : [],
     projectStates: Array.isArray(source.projectStates) ? source.projectStates : [],
-    billingAccounts: Array.isArray(source.billingAccounts) ? source.billingAccounts : []
+    billingAccounts: Array.isArray(source.billingAccounts) ? source.billingAccounts : [],
+    cellLines: Array.isArray(source.cellLines) ? source.cellLines : [],
+    cultureBatches: Array.isArray(source.cultureBatches) ? source.cultureBatches : [],
+    cultureEvents: Array.isArray(source.cultureEvents) ? source.cultureEvents : [],
+    cultureAudit: Array.isArray(source.cultureAudit) ? source.cultureAudit : [],
+    cultureCounters:
+      source.cultureCounters && typeof source.cultureCounters === "object"
+        ? {
+            cellLine: Number(source.cultureCounters.cellLine) || 1,
+            batch: Number(source.cultureCounters.batch) || 1,
+            event: Number(source.cultureCounters.event) || 1,
+            audit: Number(source.cultureCounters.audit) || 1
+          }
+        : { cellLine: 1, batch: 1, event: 1, audit: 1 }
   };
 }
 
@@ -3065,6 +3086,357 @@ app.get("/api/admin/audit", authRequired, adminRequired, async (req, res) => {
   const events = await pgq.findRecentAuditEvents(getPgPool(), { limit });
   res.json({ events });
 });
+
+// ─── Cell Culture Recorder (Phase 2 unified model) ──────────────────────────
+// Server-side port of CCR's MemoryCultureStore, backed by the file DB. One
+// shared dataset for the local lab (desktop single-user), matching standalone
+// CCR. Postgres mode is unsupported for culture data (desktop-only feature).
+
+function cultureNow() { return new Date().toISOString(); }
+
+function cultureStatusFromEvent(input) {
+  if (input.next_status) return input.next_status;
+  if (input.event_type === "freeze") return "frozen";
+  if (input.event_type === "contamination") return "contaminated";
+  if (input.event_type === "discard") return "discarded";
+  if (input.event_type === "thaw") return "active";
+  return null;
+}
+
+function cultureNormalizeBatch(b) {
+  return {
+    ...b,
+    donor_identifier: b.donor_identifier ?? null,
+    eye: b.eye ?? "unknown",
+    parent_batch_id: b.parent_batch_id ?? null,
+    split_date: b.split_date ?? null,
+    media_change_1_date: b.media_change_1_date ?? null,
+    media_change_2_date: b.media_change_2_date ?? null,
+    source_record_type: b.source_record_type ?? "culture_vessel",
+    raw_source_identifier: b.raw_source_identifier ?? null,
+    pretreatment_date: b.pretreatment_date ?? null,
+    dissociation_date: b.dissociation_date ?? null,
+    ground_truth_date_field: b.ground_truth_date_field ?? "seed_date",
+    ground_truth_date: b.ground_truth_date ?? b.started_at ?? null,
+    conflict_resolution: b.conflict_resolution ?? null,
+    raw_intake_json: b.raw_intake_json ?? "{}",
+    growth_notes: b.growth_notes ?? b.notes ?? null,
+    source_documentation: b.source_documentation ?? null
+  };
+}
+
+function cultureCompareBatches(a, b) {
+  return (
+    (a.donor_identifier ?? "").localeCompare(b.donor_identifier ?? "") ||
+    (a.eye ?? "").localeCompare(b.eye ?? "") ||
+    a.passage_number - b.passage_number ||
+    (a.started_at ?? "").localeCompare(b.started_at ?? "") ||
+    a.id - b.id
+  );
+}
+
+// Resolve an imported row's parent_label to a parent batch id (exact, case-
+// insensitive label match; disambiguated by eye + donor; ambiguous => null).
+function cultureMatchParentId(parentLabel, child, childId, candidates) {
+  const target = String(parentLabel || "").trim().toLowerCase();
+  if (!target) return null;
+  const sameLabel = candidates.filter(
+    (c) => c.id !== childId && String(c.label).trim().toLowerCase() === target
+  );
+  if (sameLabel.length === 0) return null;
+  if (sameLabel.length === 1) return sameLabel[0].id;
+  const childDonor = (child.donor_identifier ?? "").toLowerCase();
+  const childEye = child.eye ?? "unknown";
+  const narrowed = sameLabel.filter((c) => {
+    const donor = (c.donor_identifier ?? "").toLowerCase();
+    const donorOk = childDonor === "" || donor === "" || donor === childDonor;
+    return donorOk && (c.eye ?? "unknown") === childEye;
+  });
+  return narrowed.length === 1 ? narrowed[0].id : null;
+}
+
+function cultureResolveCellLine(db, cultureName) {
+  const existing = db.cellLines.find(
+    (line) => line.name.toLowerCase() === String(cultureName).toLowerCase() && line.deleted_at === null
+  );
+  if (existing) return existing.id;
+  const row = {
+    id: db.cultureCounters.cellLine++,
+    name: cultureName,
+    species: "Human",
+    tissue: "Cornea",
+    source: "Donor-derived culture",
+    identifiers: null,
+    notes: "Created from vessel intake",
+    created_at: cultureNow(),
+    updated_at: null,
+    deleted_at: null
+  };
+  db.cellLines.push(row);
+  return row.id;
+}
+
+function cultureAudit(db, entityType, entityId, operation, payload) {
+  db.cultureAudit.push({
+    id: db.cultureCounters.audit++,
+    entity_type: entityType,
+    entity_id: entityId,
+    operation,
+    payload_json: JSON.stringify(payload),
+    created_at: cultureNow()
+  });
+  if (db.cultureAudit.length > 1000) db.cultureAudit = db.cultureAudit.slice(-1000);
+}
+
+function cultureInsertBatchRow(db, input) {
+  const cellLineId = cultureResolveCellLine(db, input.culture_name);
+  const row = {
+    id: db.cultureCounters.batch++,
+    cell_line_id: cellLineId,
+    label: input.label,
+    passage_number: input.passage_number,
+    vessel: input.vessel,
+    medium: input.medium,
+    seeding_density: input.seeding_density,
+    incubator_location: input.incubator_location,
+    status: input.status,
+    started_at: input.started_at,
+    last_event_at: input.started_at,
+    notes: input.growth_notes,
+    donor_identifier: input.donor_identifier,
+    eye: input.eye,
+    parent_batch_id: input.parent_batch_id,
+    split_date: input.split_date,
+    media_change_1_date: input.media_change_1_date,
+    media_change_2_date: input.media_change_2_date,
+    source_record_type: input.source_record_type,
+    raw_source_identifier: input.raw_source_identifier,
+    pretreatment_date: input.pretreatment_date,
+    dissociation_date: input.dissociation_date,
+    ground_truth_date_field: input.ground_truth_date_field,
+    ground_truth_date: input.ground_truth_date,
+    conflict_resolution: input.conflict_resolution,
+    raw_intake_json: input.raw_intake_json,
+    growth_notes: input.growth_notes,
+    source_documentation: input.source_documentation,
+    created_at: cultureNow(),
+    updated_at: null,
+    deleted_at: null
+  };
+  db.cultureBatches.push(row);
+  return row.id;
+}
+
+function cultureBuildView(db) {
+  const cellLines = new Map(db.cellLines.map((c) => [c.id, c]));
+  const children = new Map();
+  db.cultureBatches.forEach((b) => {
+    if (b.parent_batch_id != null && b.deleted_at === null) {
+      children.set(b.parent_batch_id, (children.get(b.parent_batch_id) || 0) + 1);
+    }
+  });
+  return db.cultureBatches
+    .filter((b) => b.deleted_at === null)
+    .map((b) => {
+      const cl = cellLines.get(b.cell_line_id);
+      const parent = db.cultureBatches.find((x) => x.id === b.parent_batch_id);
+      return {
+        ...cultureNormalizeBatch(b),
+        cell_line_name: cl ? cl.name : "Unknown culture",
+        species: cl ? cl.species : "",
+        parent_label: parent ? parent.label : null,
+        child_count: children.get(b.id) || 0
+      };
+    })
+    .sort(cultureCompareBatches);
+}
+
+function cultureRecentEvents(db, batchId) {
+  let events = db.cultureEvents
+    .slice()
+    .sort((a, b) => b.event_at.localeCompare(a.event_at) || b.id - a.id);
+  if (batchId) return events.filter((e) => e.batch_id === batchId);
+  return events.slice(0, 300);
+}
+
+function cultureGuard(res) {
+  if (DB_MODE === "postgres") {
+    res.status(501).json({ error: "Culture records are only available in the desktop build." });
+    return false;
+  }
+  return true;
+}
+
+// Everything the grid needs to render in one round-trip.
+app.get("/api/culture/bootstrap", authRequired, async (req, res) => {
+  if (!cultureGuard(res)) return;
+  const db = await readDb();
+  res.json({
+    cellLines: db.cellLines.filter((c) => c.deleted_at === null),
+    batches: cultureBuildView(db),
+    events: cultureRecentEvents(db, null)
+  });
+});
+
+app.get("/api/culture/cell-lines", authRequired, async (req, res) => {
+  if (!cultureGuard(res)) return;
+  const db = await readDb();
+  res.json({ cellLines: db.cellLines.filter((c) => c.deleted_at === null) });
+});
+
+app.get("/api/culture/batches", authRequired, async (req, res) => {
+  if (!cultureGuard(res)) return;
+  const db = await readDb();
+  res.json({ batches: cultureBuildView(db) });
+});
+
+app.get("/api/culture/events", authRequired, async (req, res) => {
+  if (!cultureGuard(res)) return;
+  const db = await readDb();
+  const batchId = req.query.batchId ? Number(req.query.batchId) : null;
+  res.json({ events: cultureRecentEvents(db, batchId) });
+});
+
+app.post("/api/culture/vessels", authRequired, async (req, res) => {
+  if (!cultureGuard(res)) return;
+  const input = req.body || {};
+  if (!input.culture_name || !input.label) {
+    return res.status(400).json({ error: "culture_name and label are required." });
+  }
+  const id = await withDb((db) => {
+    const newId = cultureInsertBatchRow(db, input);
+    cultureAudit(db, "culture_vessel", newId, "CREATE", input);
+    return newId;
+  });
+  res.status(201).json({ id });
+});
+
+app.patch("/api/culture/vessels/:id", authRequired, async (req, res) => {
+  if (!cultureGuard(res)) return;
+  const id = Number(req.params.id);
+  const patch = req.body || {};
+  const result = await withDb((db) => {
+    const batch = db.cultureBatches.find((b) => b.id === id);
+    if (!batch) return { notFound: true };
+    batch.cell_line_id = cultureResolveCellLine(db, patch.culture_name);
+    batch.label = patch.label;
+    batch.passage_number = patch.passage_number;
+    batch.vessel = patch.vessel;
+    batch.medium = patch.medium;
+    batch.seeding_density = patch.seeding_density;
+    batch.incubator_location = patch.incubator_location;
+    batch.status = patch.status;
+    batch.started_at = patch.started_at;
+    batch.notes = patch.growth_notes;
+    batch.donor_identifier = patch.donor_identifier;
+    batch.eye = patch.eye;
+    batch.parent_batch_id = patch.parent_batch_id;
+    batch.split_date = patch.split_date;
+    batch.source_record_type = patch.source_record_type;
+    batch.raw_source_identifier = patch.raw_source_identifier;
+    batch.pretreatment_date = patch.pretreatment_date;
+    batch.dissociation_date = patch.dissociation_date;
+    batch.ground_truth_date_field = patch.ground_truth_date_field;
+    batch.ground_truth_date = patch.ground_truth_date;
+    batch.conflict_resolution = patch.conflict_resolution;
+    batch.growth_notes = patch.growth_notes;
+    batch.source_documentation = patch.source_documentation;
+    batch.updated_at = cultureNow();
+    cultureAudit(db, "culture_vessel", id, "UPDATE", patch);
+    return { ok: true };
+  });
+  if (result && result.notFound) return res.status(404).json({ error: "Vessel not found." });
+  res.json({ ok: true });
+});
+
+app.post("/api/culture/import", authRequired, async (req, res) => {
+  if (!cultureGuard(res)) return;
+  const inputs = Array.isArray(req.body && req.body.vessels) ? req.body.vessels : [];
+  if (!inputs.length) return res.status(400).json({ error: "No vessels to import." });
+  const ids = await withDb((db) => {
+    const created = inputs.map((input) => cultureInsertBatchRow(db, input));
+    // Snapshot candidates after all inserts so a parent can be another imported row.
+    const candidates = db.cultureBatches
+      .filter((b) => b.deleted_at === null)
+      .map((b) => ({ id: b.id, label: b.label, donor_identifier: b.donor_identifier, eye: b.eye }));
+    inputs.forEach((input, index) => {
+      if (!input.parent_label || !String(input.parent_label).trim()) return;
+      const parentId = cultureMatchParentId(input.parent_label, input, created[index], candidates);
+      if (parentId !== null) {
+        const batch = db.cultureBatches.find((b) => b.id === created[index]);
+        if (batch) batch.parent_batch_id = parentId;
+      }
+    });
+    cultureAudit(db, "database", null, "IMPORT", {
+      count: created.length,
+      labels: inputs.map((i) => i.label)
+    });
+    return created;
+  });
+  res.status(201).json({ ids });
+});
+
+app.post("/api/culture/events", authRequired, async (req, res) => {
+  if (!cultureGuard(res)) return;
+  const input = req.body || {};
+  if (!input.batch_id || !input.event_type || !input.event_at) {
+    return res.status(400).json({ error: "batch_id, event_type and event_at are required." });
+  }
+  await withDb((db) => {
+    const row = {
+      id: db.cultureCounters.event++,
+      batch_id: input.batch_id,
+      event_type: input.event_type,
+      event_at: input.event_at,
+      confluence_percent: input.confluence_percent ?? null,
+      viability_percent: input.viability_percent ?? null,
+      split_ratio: input.split_ratio ?? null,
+      medium: input.medium ?? null,
+      reagent_lot: input.reagent_lot ?? null,
+      operator: input.operator ?? null,
+      notes: input.notes ?? "",
+      created_at: cultureNow()
+    };
+    db.cultureEvents.push(row);
+    const batch = db.cultureBatches.find((b) => b.id === input.batch_id);
+    const nextStatus = cultureStatusFromEvent(input);
+    if (batch) {
+      batch.last_event_at = input.event_at;
+      batch.updated_at = cultureNow();
+      if (input.next_passage_number != null) batch.passage_number = input.next_passage_number;
+      if (nextStatus) batch.status = nextStatus;
+    }
+    cultureAudit(db, "culture_event", row.id, "CREATE", input);
+  });
+  res.status(201).json({ ok: true });
+});
+
+// Replace all culture data from a backup package (used to migrate a standalone
+// Cell Culture Recorder backup into the integrated app). The client validates
+// the checksum before calling.
+app.post("/api/culture/restore", authRequired, async (req, res) => {
+  if (!cultureGuard(res)) return;
+  const data = req.body && req.body.data;
+  if (!data || !Array.isArray(data.cellLines) || !Array.isArray(data.cultureBatches)) {
+    return res.status(400).json({ error: "Invalid backup data." });
+  }
+  const maxId = (arr) => arr.reduce((m, x) => Math.max(m, Number(x && x.id) || 0), 0);
+  await withDb((db) => {
+    db.cellLines = data.cellLines.slice();
+    db.cultureBatches = data.cultureBatches.map(cultureNormalizeBatch);
+    db.cultureEvents = Array.isArray(data.cultureEvents) ? data.cultureEvents.slice() : [];
+    db.cultureAudit = Array.isArray(data.auditLog) ? data.auditLog.slice() : [];
+    db.cultureCounters = {
+      cellLine: maxId(db.cellLines) + 1,
+      batch: maxId(db.cultureBatches) + 1,
+      event: maxId(db.cultureEvents) + 1,
+      audit: maxId(db.cultureAudit) + 1
+    };
+    cultureAudit(db, "database", null, "RESTORE", { restoredAt: cultureNow() });
+  });
+  res.json({ ok: true });
+});
+// ─── end Cell Culture Recorder ──────────────────────────────────────────────
 
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "API route not found." });
