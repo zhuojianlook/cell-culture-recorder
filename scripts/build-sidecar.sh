@@ -53,7 +53,12 @@ codesign --remove-signature "$WORK/api-server" 2>/dev/null || true
 ( cd "$WORK" && npx -y postject api-server NODE_SEA_BLOB sea-prep.blob \
     --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 \
     --macho-segment-name NODE_SEA )
-codesign --sign - "$WORK/api-server" 2>/dev/null || true
+# Sign ad-hoc WITH JIT entitlements — V8 needs allow-jit /
+# allow-unsigned-executable-memory to reserve executable memory inside a signed,
+# Gatekeeper-restricted .app on Apple Silicon, or it's killed on startup.
+codesign --force --sign - --entitlements "$PROJECT_DIR/src-tauri/entitlements.plist" \
+    --options runtime "$WORK/api-server"
+echo "Sidecar entitlements:"; codesign -d --entitlements :- "$WORK/api-server" 2>/dev/null || true
 
 # 4. Place it where Tauri externalBin expects.
 mkdir -p "$BIN_DIR"

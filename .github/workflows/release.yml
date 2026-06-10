@@ -107,6 +107,19 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
 
+      - name: Verify bundled sidecar JIT entitlements
+        if: steps.release1.outcome == 'success'
+        continue-on-error: true
+        run: |
+          APP=$(find src-tauri/target -path "*bundle/macos/*.app" -maxdepth 6 -type d | head -1)
+          echo "App bundle: $APP"
+          SIDE=$(find "$APP/Contents/MacOS" -name "api-server*" 2>/dev/null | head -1)
+          echo "Sidecar: $SIDE"
+          echo "--- codesign entitlements (expect allow-jit = true) ---"
+          codesign -d --entitlements :- "$SIDE" 2>&1 || true
+          echo "--- codesign verify ---"
+          codesign -dvv "$SIDE" 2>&1 | grep -iE "flags|signature|runtime" || true
+
       - name: Build and publish release (attempt 3)
         id: release3
         if: steps.release1.outcome == 'failure' && steps.release2.outcome == 'failure'
