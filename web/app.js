@@ -552,6 +552,9 @@ function clearApiSession() {
 }
 
 function hasActiveBackendSession() {
+  // Offline desktop: the bundled server requires no auth and maps every request
+  // to a fixed local user, so a real session token is unnecessary.
+  if (!window.__REQUIRE_AUTH) return !!currentUser;
   if (!currentUser || !apiSessionToken) return false;
   if (!apiSessionExpiresAt) return true;
   const expiresMs = new Date(apiSessionExpiresAt).getTime();
@@ -3944,7 +3947,14 @@ initAuthGate();
 initRouter();
 
 function initRouter() {
-  if (!window.__REQUIRE_AUTH) return;
+  // Offline single-user desktop (no login): establish a local front-end session
+  // so the project dashboard + "New Project" button get wired and backend sync
+  // works. The bundled server runs with REQUIRE_AUTH off and maps every request
+  // to a fixed local user, so no real token is needed. Without this the router
+  // used to bail here and the app dropped straight into an empty workspace.
+  if (!window.__REQUIRE_AUTH && !currentUser) {
+    applySignedInUser("Local User", "local", "local@wetlab.app");
+  }
 
   const page = document.querySelector(".page");
   if (page) page.style.display = "none";

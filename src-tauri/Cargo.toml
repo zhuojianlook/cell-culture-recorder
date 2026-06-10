@@ -1,6 +1,6 @@
 [package]
 name = "cell-culture-recorder"
-version = "0.2.0"
+version = "0.2.1"
 description = "WetLab Planner — integrated lab planning + cell culture recorder"
 authors = ["zhuojian"]
 edition = "2021"

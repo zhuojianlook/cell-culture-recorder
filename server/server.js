@@ -10,6 +10,16 @@ const pgq = require("./backend/pg-queries");
 
 const app = express();
 
+// The server runs as a bundled desktop sidecar — a single unhandled async
+// rejection (e.g. a transient file-DB write error) must not take the whole
+// backend down and leave the app dead. Log and keep serving instead.
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] Unhandled promise rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[server] Uncaught exception:", err);
+});
+
 const ROOT_DIR = __dirname;
 const DATA_DIR = resolveDataDir();
 const DB_FILE = resolveDbFilePath();
@@ -933,11 +943,21 @@ async function readDbFile() {
   return normalizeDbShape(parsed);
 }
 
+let fileWriteLock = Promise.resolve();
+let fileWriteSeq = 0;
 async function writeDbFile(db) {
-  await ensureDbFile();
-  const tmpPath = `${DB_FILE}.tmp`;
-  await fs.writeFile(tmpPath, JSON.stringify(normalizeDbShape(db), null, 2), "utf8");
-  await fs.rename(tmpPath, DB_FILE);
+  // Serialize writes and use a unique temp filename per write. A single shared
+  // "<db>.tmp" path lets concurrent writers clobber each other's temp file,
+  // so the second rename hits ENOENT and (unhandled) crashes the process.
+  const run = async () => {
+    await ensureDbFile();
+    fileWriteSeq += 1;
+    const tmpPath = `${DB_FILE}.${process.pid}.${fileWriteSeq}.tmp`;
+    await fs.writeFile(tmpPath, JSON.stringify(normalizeDbShape(db), null, 2), "utf8");
+    await fs.rename(tmpPath, DB_FILE);
+  };
+  fileWriteLock = fileWriteLock.then(run, run);
+  return fileWriteLock;
 }
 
 // readDbPostgres / writeDbPostgres removed — replaced by per-row pgq.* queries.
@@ -1329,10 +1349,17 @@ async function authRequired(req, res, next) {
   // Single-user local desktop mode (no login): attach a fixed default local user
   // (created once in the file DB) and skip token validation entirely.
   if (!REQUIRE_AUTH && DB_MODE !== "postgres") {
-    const db = await readDb();
-    const before = db.users.length;
-    const user = ensureUserForEmail(db, "local@wetlab.app", "Local User");
-    if (db.users.length !== before) await writeDb(db);
+    // Read first (cheap); only when the local user doesn't exist yet do a
+    // serialized create through withDb. On first boot the frontend fires
+    // several requests concurrently — without serialization they'd all
+    // read-modify-write the file DB at once and crash on the temp-file rename.
+    const existing = await readDb();
+    let user = existing.users.find(
+      (u) => normalizeEmail(u.email) === normalizeEmail("local@wetlab.app")
+    );
+    if (!user) {
+      user = await withDb((db) => ensureUserForEmail(db, "local@wetlab.app", "Local User"));
+    }
     req.auth = { token: "local", userId: user.id, user, sessionId: "local" };
     return next();
   }
