@@ -556,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "cell-culture-recorder"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "log",
  "reqwest 0.12.28",
@@ -5549,7 +5549,7 @@ checksum = "9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c"
 
 [[package]]
 name = "unicode-xid"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 

@@ -831,6 +831,10 @@ function scheduleCanvasSync() {
   }, 2000);
 }
 
+// Let the culture-record editor (culture.js) trigger a debounced canvas save
+// after it writes culture fields onto a vessel node's dataset.
+window.wlpMarkCanvasDirty = scheduleCanvasSync;
+
 // ── Hash Router ──────────────────────────────────────────────────────
 function parseHashRoute() {
   const hash = window.location.hash || "";
@@ -4856,6 +4860,12 @@ function wireDropNode(drop) {
     }
     if (isMultiWellPlateNode(drop)) {
       openPlateSelectorModal(drop); return;
+    }
+    // Cell Culture: a vessel/dish/starting-material node IS its culture record.
+    if (getNodeWorkspace(drop) === "cell-culture" && window.WLPCulture) {
+      const iconId = String(drop.dataset.iconId || "");
+      const isCulture = isVesselOrDishNode(drop) || iconId === "cell_line" || iconId === "primary_tissue";
+      if (isCulture) { window.WLPCulture.openRecord(drop); return; }
     }
     showNodeMenu(drop);
   });
