@@ -1,6 +1,11 @@
 node_modules
 dist
 src-tauri/target
+# Bundled Node sidecar binary (~86 MB) — built by scripts/build-sidecar.sh in CI.
+src-tauri/binaries/
+# Stray dev file-DB carried over from WetlabPlanner (real users/session tokens).
+# The desktop app's DB lives in the OS app-data dir, not here.
+server/backend/data/*.json
 .DS_Store
 *.log
 .env

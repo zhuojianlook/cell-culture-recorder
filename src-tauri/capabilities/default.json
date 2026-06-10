@@ -9,6 +9,15 @@
     "process:default",
     "sql:default",
     "sql:allow-execute",
-    "updater:default"
+    "updater:default",
+    "shell:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [{ "name": "binaries/api-server", "sidecar": true, "args": true }]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [{ "name": "binaries/api-server", "sidecar": true, "args": true }]
+    }
   ]
 }

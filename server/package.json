@@ -1,0 +1,17 @@
+{
+  "name": "wetlab-planner-sidecar",
+  "version": "1.0.0",
+  "description": "WetLab Planner Express server, bundled as the Tauri api-server sidecar.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "ISC",
+  "comment": "Only the deps statically required by server.js + backend/pg-queries.js are listed. stripe/bcrypt/pg-native are dynamic, postgres/billing-only requires and are externalized by esbuild (see scripts/build-sidecar.sh) — they never run in the desktop file-DB build. clocklet/jsdom were unused frontend/phantom deps (the latter pulled a git-over-SSH transitive that breaks CI) and are intentionally dropped.",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "pg": "^8.18.0"
+  }
+}

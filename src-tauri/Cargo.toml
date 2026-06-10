@@ -1,7 +1,7 @@
 [package]
 name = "cell-culture-recorder"
-version = "0.1.10"
-description = "Native cell culture record keeper"
+version = "0.2.0"
+description = "WetLab Planner — integrated lab planning + cell culture recorder"
 authors = ["zhuojian"]
 edition = "2021"
 rust-version = "1.77.2"
@@ -21,3 +21,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
+tauri-plugin-shell = "2"
+tauri-plugin-log = "2"
+log = "0.4"
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+url = "2"

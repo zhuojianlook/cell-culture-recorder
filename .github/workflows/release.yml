@@ -57,6 +57,12 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Compile the WetlabPlanner Express server into the bundled `api-server`
+      # sidecar (Node SEA single binary). Must run before tauri-action so the
+      # binary exists in src-tauri/binaries/ when the app is bundled.
+      - name: Build Node sidecar (api-server)
+        run: bash scripts/build-sidecar.sh aarch64-apple-darwin
+
       - name: Build and publish release (attempt 1)
         id: release1
         continue-on-error: true
@@ -65,10 +71,10 @@ jobs:
           args: --target aarch64-apple-darwin
           # On a tag push, github.ref_name is the tag; on manual dispatch, use the input.
           tagName: ${{ inputs.tag || github.ref_name }}
-          releaseName: "Cell Culture Recorder __VERSION__"
+          releaseName: "WetLab Planner __VERSION__"
           releaseBody: |
             Automated Apple Silicon build for __VERSION__. First install: open the
-            `.dmg` and drag **Cell Culture Recorder** into Applications (first launch:
+            `.dmg` and drag **WetLab Planner** into Applications (first launch:
             right-click the app -> Open once to clear Gatekeeper). After that, the app
             checks for updates on launch and installs them in place.
           releaseDraft: false
@@ -83,10 +89,10 @@ jobs:
         with:
           args: --target aarch64-apple-darwin
           tagName: ${{ inputs.tag || github.ref_name }}
-          releaseName: "Cell Culture Recorder __VERSION__"
+          releaseName: "WetLab Planner __VERSION__"
           releaseBody: |
             Automated Apple Silicon build for __VERSION__. First install: open the
-            `.dmg` and drag **Cell Culture Recorder** into Applications (first launch:
+            `.dmg` and drag **WetLab Planner** into Applications (first launch:
             right-click the app -> Open once to clear Gatekeeper). After that, the app
             checks for updates on launch and installs them in place.
           releaseDraft: false
@@ -100,10 +106,10 @@ jobs:
         with:
           args: --target aarch64-apple-darwin
           tagName: ${{ inputs.tag || github.ref_name }}
-          releaseName: "Cell Culture Recorder __VERSION__"
+          releaseName: "WetLab Planner __VERSION__"
           releaseBody: |
             Automated Apple Silicon build for __VERSION__. First install: open the
-            `.dmg` and drag **Cell Culture Recorder** into Applications (first launch:
+            `.dmg` and drag **WetLab Planner** into Applications (first launch:
             right-click the app -> Open once to clear Gatekeeper). After that, the app
             checks for updates on launch and installs them in place.
           releaseDraft: false

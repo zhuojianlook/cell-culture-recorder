@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WetLab Planner</title>
+  <link rel="stylesheet" href="vendor/clocklet.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="authGate" class="auth-gate is-hidden">
+    <div class="auth-gate__bg" aria-hidden="true"></div>
+    <div class="auth-gate__card">
+      <div class="auth-gate__logo" aria-hidden="true">
+        <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M16 6h16"/>
+          <path d="M20 6v10l-9.5 16.1a5 5 0 0 0 4.3 7.4h18.4a5 5 0 0 0 4.3-7.4L28 16V6"/>
+          <path d="M15.5 28h17"/>
+          <circle cx="22" cy="33" r="1.5" fill="currentColor"/>
+          <circle cx="29" cy="31" r="1" fill="currentColor"/>
+        </svg>
+      </div>
+      <h1 class="auth-gate__title">WetLab Planner</h1>
+      <p id="authGateSubtitle" class="auth-gate__subtitle">Sign in to access your projects</p>
+      <p class="auth-gate__tagline">Plan, track, and manage your lab experiments</p>
+      <div id="authGateGoogleMount" class="google-signin-mount"></div>
+      <small id="authGateHint" class="sign-in-help"></small>
+      <div class="auth-gate__divider"><span>or</span></div>
+      <div id="authGateLoginForm" class="auth-gate__local">
+        <div class="field">
+          <label for="authGateEmail">Email</label>
+          <input type="email" id="authGateEmail" placeholder="you@example.com">
+        </div>
+        <div class="field">
+          <label for="authGatePass">Password</label>
+          <input type="password" id="authGatePass" placeholder="Password">
+        </div>
+        <button type="button" id="authGateLocalBtn" class="btn btn--primary">Sign in</button>
+        <p class="auth-gate__toggle">Don't have an account? <a href="#" id="authGateShowSignup">Sign up</a></p>
+      </div>
+      <div id="authGateSignupForm" class="auth-gate__local is-hidden">
+        <div class="field">
+          <label for="authGateSignupName">Name</label>
+          <input type="text" id="authGateSignupName" placeholder="Your name">
+        </div>
+        <div class="field">
+          <label for="authGateSignupEmail">Email</label>
+          <input type="email" id="authGateSignupEmail" placeholder="you@example.com">
+        </div>
+        <div class="field">
+          <label for="authGateSignupPass">Password</label>
+          <input type="password" id="authGateSignupPass" placeholder="At least 8 characters">
+        </div>
+        <div class="field">
+          <label for="authGateSignupConfirm">Confirm password</label>
+          <input type="password" id="authGateSignupConfirm" placeholder="Confirm password">
+        </div>
+        <button type="button" id="authGateSignupBtn" class="btn btn--primary">Create account</button>
+        <p class="auth-gate__toggle">Already have an account? <a href="#" id="authGateShowLogin">Sign in</a></p>
+      </div>
+      <div id="authGateStatus" class="form-status"></div>
+    </div>
+  </div>
+
+  <div id="projectDashboard" class="dashboard is-hidden">
+    <header class="dashboard__header">
+      <h1 class="dashboard__title">WetLab Planner</h1>
+      <div class="dashboard__user">
+        <span id="dashboardUserName"></span>
+        <button id="dashboardAdminBtn" type="button" class="btn--admin is-hidden" title="Admin Panel" hidden>Admin</button>
+        <button id="dashboardSignOut" type="button" hidden>Sign out</button>
+      </div>
+    </header>
+    <div class="dashboard__body">
+      <div class="dashboard__toolbar">
+        <h2>My Projects</h2>
+        <button id="dashboardNewProject" type="button" class="btn btn--accent">+ New Project</button>
+      </div>
+      <div id="dashboardProjectGrid" class="dashboard__grid"></div>
+    </div>
+  </div>
+  <div class="page">
+    <aside class="palette" aria-label="Culture Vessels and Starting Material">
+      <div class="palette__header">
+        <h1 id="paletteTitle">Culture Vessels and Starting Material</h1>
+        <p id="paletteSubtitle">Drag an icon into the canvas to place it.</p>
+      </div>
+      <div class="palette__tabs" id="paletteTabs" aria-label="Palette categories"></div>
+      <div class="palette__list" id="paletteList"></div>
+      <div class="palette__footer">
+        <button id="editTemplates" type="button">Edit Media Plan Templates</button>
+        <button id="userMgmt" type="button" style="margin-top:10px;" hidden>User Management</button>
+        <button id="mediaFormBtn" type="button" class="palette-feature-btn">
+          <span class="palette-feature-btn__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M8 3h8"></path>
+              <path d="M10 3v5l-5.2 8.8A3 3 0 0 0 7.4 21h9.2a3 3 0 0 0 2.6-4.2L14 8V3"></path>
+              <path d="M8.5 14h7"></path>
+            </svg>
+          </span>
+          <span class="palette-feature-btn__label">Media Formulation</span>
+          <span class="palette-feature-btn__chevron" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M9 6l6 6-6 6"></path>
+            </svg>
+          </span>
+        </button>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button id="inventoryBtn" type="button" style="flex:1;">Inventory</button>
+          <button id="aliquotBtn" type="button" style="flex:1;">Aliquot</button>
+        </div>
+        <button id="storageBtn" type="button" style="margin-top:10px;">Storage</button>
+        <button id="storageBoxBtn" type="button" style="margin-top:10px;">Storage Boxes</button>
+        <button id="exportProjectBtn" type="button" style="margin-top:10px;">Export Project Data</button>
+        <section id="planningTaskPanel" class="workspace-panel is-hidden" aria-label="Planning tasks">
+          <h3 class="workspace-panel__title">Planning Tasks</h3>
+          <ul id="planningTaskList" class="workspace-panel__list"></ul>
+        </section>
+        <section id="animalHousingPanel" class="workspace-panel is-hidden" aria-label="Animal housing">
+          <div class="workspace-panel__header">
+            <h3 class="workspace-panel__title">Animal Housing</h3>
+            <button id="animalHousingToggle" class="workspace-panel__toggle" type="button" aria-expanded="true">Hide</button>
+          </div>
+          <ul id="animalHousingList" class="workspace-panel__list animal-housing-list"></ul>
+        </section>
+        <section id="animalTransferPanel" class="workspace-panel is-hidden" aria-label="Animal transfers">
+          <h3 class="workspace-panel__title">Animal Transfers</h3>
+          <ul id="animalTransferList" class="workspace-panel__list"></ul>
+        </section>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <div class="workspace__toolbar">
+        <div class="workspace__left">
+          <div id="workspaceTabs" class="workspace-tabs" role="tablist" aria-label="Workspace tabs"></div>
+          <div class="workspace__title" aria-hidden="true"></div>
+        </div>
+        <div class="workspace__actions">
+          <button id="backToDashboard" type="button" class="back-btn" style="display:none">&larr; Dashboard</button>
+          <button id="userSignIn" type="button" hidden>Sign in</button>
+          <button id="billingBtn" type="button" hidden>Billing</button>
+          <button id="deleteSelection" type="button" class="is-hidden">Delete selected</button>
+          <button id="jumpToday" type="button" aria-label="Jump to today">Today</button>
+          <button id="zoomIn" type="button" class="icon-btn" aria-label="Zoom in">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="M21 21l-4.35-4.35"></path>
+              <path d="M11 8v6"></path>
+              <path d="M8 11h6"></path>
+            </svg>
+          </button>
+          <button id="zoomOut" type="button" class="icon-btn" aria-label="Zoom out">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="M21 21l-4.35-4.35"></path>
+              <path d="M8 11h6"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="canvas" class="canvas" role="region" aria-label="Design canvas" tabindex="0">
+        <div id="weekendStripes" class="weekend-stripes" aria-hidden="true"></div>
+        <div id="dayGrid" class="day-grid" aria-hidden="true"></div>
+        <div id="timeline" class="timeline" aria-hidden="true"></div>
+        <div id="milestoneLayer" class="milestone-layer" aria-hidden="true"></div>
+        <div class="timeline-nav">
+          <button id="timelinePrev" type="button" aria-label="Previous days">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 18l-6-6 6-6"></path>
+            </svg>
+          </button>
+          <div class="timeline-nav__label"></div>
+          <button id="timelineNext" type="button" aria-label="Next days">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 18l6-6-6-6"></path>
+            </svg>
+          </button>
+        </div>
+        <div id="todayLine" class="today-line" aria-hidden="true"></div>
+        <div id="todayTriangle" class="today-triangle" aria-hidden="true"></div>
+        <div id="todayTimeLabel" class="today-time" aria-hidden="true"></div>
+        <svg id="connectionsLayer" class="canvas__links" aria-hidden="true">
+          <defs>
+            <marker id="arrowhead" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="6" markerHeight="6" orient="auto" markerUnits="strokeWidth">
+              <path d="M 0 1 L 8 5 L 0 9 z" fill="context-stroke" stroke="context-stroke" stroke-linejoin="round"></path>
+            </marker>
+          </defs>
+        </svg>
+        <svg id="connectionsTopLayer" class="canvas__links canvas__links--top" aria-hidden="true">
+          <defs>
+            <marker id="arrowhead-top" viewBox="0 0 10 10" refX="9.5" refY="5" markerWidth="6" markerHeight="6" orient="auto" markerUnits="strokeWidth">
+              <path d="M 0 1 L 8 5 L 0 9 z" fill="context-stroke" stroke="context-stroke" stroke-linejoin="round"></path>
+            </marker>
+          </defs>
+        </svg>
+        <p class="canvas__hint">Drop icons here</p>
+      </div>
+    </main>
+
+    <div id="animalHousingDrawer" class="housing-drawer is-hidden">
+      <div class="housing-drawer__header">
+        <h3>Cage Arrangement Board</h3>
+        <button id="housingDrawerClose" type="button" class="housing-drawer__close">&times;</button>
+      </div>
+      <div id="animalHousingBoard" class="animal-housing-board">
+        <div id="animalHousingStage" class="animal-housing-stage"></div>
+      </div>
+    </div>
+    <span id="housingDrawerToggle" class="housing-drawer-toggle is-hidden" role="button" tabindex="0" aria-label="Open cage arrangement board">
+      <span class="housing-drawer-toggle__icon">&#x25B6;</span>
+    </span>
+  </div>
+
+  <script>
+    // Offline desktop build: no Google sign-in, no web login. The Express
+    // server runs as a bundled sidecar in file-DB mode with REQUIRE_AUTH=false,
+    // so the app boots straight into the workspace.
+    window.CELLCULTURE_GOOGLE_CLIENT_ID = "";
+    window.__REQUIRE_AUTH = false;
+  </script>
+  <script src="vendor/clocklet.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
