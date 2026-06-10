@@ -50,6 +50,13 @@ struct UpdateProgress {
     total: Option<u64>,
 }
 
+#[derive(serde::Serialize, Clone)]
+struct UpdateInfo {
+    available: bool,
+    version: String,
+    current_version: String,
+}
+
 struct SidecarPort(u16);
 struct SidecarError(Arc<Mutex<Option<String>>>);
 struct SidecarChild(Arc<Mutex<Option<CommandChild>>>);
@@ -167,16 +174,34 @@ fn kill_sidecar_process(child_mutex: &Arc<Mutex<Option<CommandChild>>>) {
     }
 }
 
+/// Check the configured release endpoint for a newer version (no download).
 #[tauri::command]
-async fn download_and_install_update(app: tauri::AppHandle, manifest_url: String) -> Result<String, String> {
-    eprintln!("[updater] Checking update from: {}", manifest_url);
-    let url = url::Url::parse(&manifest_url).map_err(|e| format!("Invalid URL: {}", e))?;
-    let updater = app.updater_builder()
-        .endpoints(vec![url]).map_err(|e| format!("Failed to set endpoints: {}", e))?
-        .build().map_err(|e| format!("Failed to build updater: {}", e))?;
-    let update = updater.check().await.map_err(|e| format!("Update check failed: {}", e))?;
-    let update = update.ok_or_else(|| "No update available".to_string())?;
-    eprintln!("[updater] Got update: version={}", update.version);
+async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    let current = app.package_info().version.to_string();
+    let updater = app.updater().map_err(|e| format!("Updater unavailable: {}", e))?;
+    match updater.check().await.map_err(|e| format!("Update check failed: {}", e))? {
+        Some(update) => Ok(UpdateInfo {
+            available: true,
+            version: update.version.clone(),
+            current_version: current,
+        }),
+        None => Ok(UpdateInfo {
+            available: false,
+            version: current.clone(),
+            current_version: current,
+        }),
+    }
+}
+
+/// Download + install the available update from the configured endpoint.
+/// Emits `updater://progress` and `updater://finished` so the UI can show a
+/// progress bar. The caller restarts via `restart_app` afterwards.
+#[tauri::command]
+async fn download_and_install_update(app: tauri::AppHandle) -> Result<String, String> {
+    let updater = app.updater().map_err(|e| format!("Updater unavailable: {}", e))?;
+    let update = updater.check().await.map_err(|e| format!("Update check failed: {}", e))?
+        .ok_or_else(|| "No update available".to_string())?;
+    eprintln!("[updater] Installing version={}", update.version);
     let mut total_downloaded = 0u64;
     let app_for_progress = app.clone();
     let app_for_finished = app.clone();
@@ -187,7 +212,16 @@ async fn download_and_install_update(app: tauri::AppHandle, manifest_url: String
         },
         move || { let _ = app_for_finished.emit::<()>("updater://finished", ()); },
     ).await.map_err(|e| format!("Download/install failed: {}", e))?;
-    Ok("Installed. Please restart the app to apply.".to_string())
+    Ok("Installed. Restart to apply.".to_string())
+}
+
+/// Kill the sidecar and relaunch the app (after an update install).
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    if let Some(state) = app.try_state::<SidecarChild>() {
+        kill_sidecar_process(&state.0);
+    }
+    app.restart();
 }
 
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
@@ -347,7 +381,9 @@ pub fn run() {
             proxy_request,
             proxy_upload,
             kill_sidecar,
-            download_and_install_update
+            check_for_update,
+            download_and_install_update,
+            restart_app
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
