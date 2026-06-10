@@ -834,6 +834,11 @@ function scheduleCanvasSync() {
 // Let the culture-record editor (culture.js) trigger a debounced canvas save
 // after it writes culture fields onto a vessel node's dataset.
 window.wlpMarkCanvasDirty = scheduleCanvasSync;
+// Jump the timeline to a vessel node + select it (used by the Records grid).
+window.wlpFocusNode = function (nodeId) {
+  try { focusNodeById(nodeId); } catch (e) { /* ignore */ }
+};
+window.wlpActiveWorkspace = function () { return activeWorkspaceId; };
 
 // ── Hash Router ──────────────────────────────────────────────────────
 function parseHashRoute() {

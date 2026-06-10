@@ -188,13 +188,184 @@
     hide();
   }
 
-  // Status → a small colour for any future badges/grid.
+  // Status → a small colour for badges/grid.
   function statusColor(s) {
     return { active: "#5eead4", frozen: "#7dd3fc", contaminated: "#fca5a5", discarded: "#94a3b8" }[s] || "#94a3b8";
   }
 
+  // ─── Records grid (the recorder ledger view) ──────────────────────────────
+
+  function allCultureVessels() {
+    return Array.prototype.slice
+      .call(document.querySelectorAll('.drop[data-workspace="cell-culture"]'))
+      .filter(function (n) {
+        var id = String(n.dataset.iconId || "");
+        return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id === "cell_line" || id === "primary_tissue";
+      });
+  }
+
+  function warningsFor(node) {
+    var w = [];
+    if (!read(node, "Donor", "")) w.push("no donor");
+    if (!read(node, "SeedDate", "")) w.push("no seed date");
+    return w;
+  }
+
+  function compareNodes(a, b) {
+    return (
+      read(a, "Donor", "").localeCompare(read(b, "Donor", "")) ||
+      read(a, "Eye", "").localeCompare(read(b, "Eye", "")) ||
+      (Number(read(a, "Passage", "0")) - Number(read(b, "Passage", "0"))) ||
+      read(a, "SeedDate", "").localeCompare(read(b, "SeedDate", ""))
+    );
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  var grid = null;
+
+  function buildGrid() {
+    if (grid) return grid;
+    var el = document.createElement("div");
+    el.id = "wlpcGrid";
+    el.className = "modal-backdrop is-hidden";
+    el.style.cssText =
+      "position:fixed;inset:0;z-index:9000;background:rgba(2,6,23,.78);display:none;" +
+      "padding:4vh 4vw;overflow:auto";
+    el.innerHTML =
+      '<div style="max-width:1100px;margin:0 auto;background:#0f172a;border:1px solid rgba(148,163,184,.18);' +
+      'border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.5)">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;' +
+        'border-bottom:1px solid rgba(148,163,184,.14)">' +
+          '<div><h2 style="margin:0;font-size:1.1rem;color:#e5e7eb">Cell Culture Records</h2>' +
+          '<div id="wlpcGridSub" style="font-size:.8125rem;color:#94a3b8;margin-top:2px"></div></div>' +
+          '<button type="button" id="wlpcGridClose" class="btn">Back to timeline</button>' +
+        '</div>' +
+        '<div id="wlpcGridBody" style="padding:8px 14px 18px"></div>' +
+      '</div>';
+    document.body.appendChild(el);
+    el.querySelector("#wlpcGridClose").onclick = closeGrid;
+    el.addEventListener("click", function (e) { if (e.target === el) closeGrid(); });
+    grid = el;
+    return el;
+  }
+
+  function renderGrid() {
+    var body = grid.querySelector("#wlpcGridBody");
+    var vessels = allCultureVessels().sort(compareNodes);
+    grid.querySelector("#wlpcGridSub").textContent =
+      vessels.length + (vessels.length === 1 ? " vessel" : " vessels") + " in this project";
+    if (!vessels.length) {
+      body.innerHTML =
+        '<p style="color:#94a3b8;padding:24px;text-align:center">No vessels yet. Drop a flask, dish, ' +
+        'or cell line onto the Cell Culture timeline, then double-click it to add its record.</p>';
+      return;
+    }
+    var rows = vessels.map(function (n) {
+      var w = warningsFor(n);
+      var status = read(n, "Status", "active");
+      var warn = w.length
+        ? '<span title="' + esc(w.join(", ")) + '" style="color:#fca5a5">&#9888; ' + w.length + "</span>"
+        : '<span style="color:#475569">&#10003;</span>';
+      return (
+        '<tr data-node-id="' + esc(n.dataset.nodeId) + '" style="cursor:pointer;border-top:1px solid rgba(148,163,184,.10)">' +
+        td(read(n, "Donor", "") || '<span style="color:#64748b">—</span>', "font-weight:600") +
+        td(read(n, "Eye", "")) +
+        td(read(n, "Passage", "") !== "" ? "P" + read(n, "Passage", "") : "") +
+        td(vesselTypeFromIcon(n)) +
+        '<td style="padding:8px 10px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;' +
+          'background:' + statusColor(status) + ';margin-right:6px"></span>' + esc(status) + "</td>" +
+        td(read(n, "Medium", "")) +
+        td(read(n, "SeedDate", "")) +
+        td(parentLabelOf(n)) +
+        '<td style="padding:8px 10px;text-align:center">' + warn + "</td>" +
+        "</tr>"
+      );
+    }).join("");
+    body.innerHTML =
+      '<table style="width:100%;border-collapse:collapse;font-size:.8125rem;color:#e5e7eb">' +
+      '<thead><tr style="color:#94a3b8;text-align:left">' +
+        th("Donor") + th("Eye") + th("P#") + th("Vessel") + th("Status") + th("Medium") +
+        th("Seed date") + th("Lineage parent") + th("⚠") +
+      "</tr></thead><tbody>" + rows + "</tbody></table>";
+    Array.prototype.forEach.call(body.querySelectorAll("tr[data-node-id]"), function (tr) {
+      tr.addEventListener("mouseenter", function () { tr.style.background = "rgba(148,163,184,.06)"; });
+      tr.addEventListener("mouseleave", function () { tr.style.background = ""; });
+      tr.addEventListener("click", function () {
+        var id = tr.getAttribute("data-node-id");
+        var node = document.querySelector('.drop[data-node-id="' + id + '"]');
+        if (!node) return;
+        closeGrid();
+        if (typeof window.wlpFocusNode === "function") window.wlpFocusNode(id);
+        setTimeout(function () { openRecord(node); }, 60);
+      });
+    });
+  }
+  function td(html, extra) { return '<td style="padding:8px 10px;' + (extra || "") + '">' + html + "</td>"; }
+  function th(t) { return '<th style="padding:8px 10px;font-weight:600">' + t + "</th>"; }
+  function parentLabelOf(n) {
+    var pid = read(n, "ParentNodeId", "");
+    if (!pid) return "";
+    var p = document.querySelector('.drop[data-node-id="' + pid + '"]');
+    return p ? esc(nodeLabel(p)) : "";
+  }
+
+  function openGrid() {
+    buildGrid();
+    renderGrid();
+    grid.classList.remove("is-hidden");
+    grid.style.display = "block";
+  }
+  function closeGrid() {
+    if (!grid) return;
+    grid.classList.add("is-hidden");
+    grid.style.display = "none";
+  }
+
+  // Inject a "Records" toggle into the workspace toolbar, visible only while the
+  // Cell Culture workspace is active.
+  function injectRecordsButton() {
+    var actions = document.querySelector(".workspace__actions");
+    if (!actions || document.getElementById("wlpcRecordsBtn")) return;
+    var btn = document.createElement("button");
+    btn.id = "wlpcRecordsBtn";
+    btn.type = "button";
+    btn.textContent = "🧫 Records";
+    btn.title = "Cell culture records for this project";
+    btn.style.display = "none";
+    btn.onclick = openGrid;
+    actions.insertBefore(btn, actions.firstChild);
+    function sync() {
+      var ws = typeof window.wlpActiveWorkspace === "function" ? window.wlpActiveWorkspace() : "";
+      btn.style.display = ws === "cell-culture" ? "" : "none";
+    }
+    document.addEventListener("click", function (e) {
+      if (e.target && e.target.closest && e.target.closest(".workspace-tab")) setTimeout(sync, 50);
+    });
+    sync();
+    // Re-check periodically in case the workspace changes by other means.
+    setInterval(sync, 1500);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", injectRecordsButton);
+  } else {
+    injectRecordsButton();
+  }
+  // The toolbar may render slightly after load; retry a few times.
+  var tries = 0;
+  var retry = setInterval(function () {
+    injectRecordsButton();
+    if (document.getElementById("wlpcRecordsBtn") || ++tries > 20) clearInterval(retry);
+  }, 500);
+
   window.WLPCulture = {
     openRecord: openRecord,
+    openGrid: openGrid,
     read: read,
     statusColor: statusColor,
     vesselTypeFromIcon: vesselTypeFromIcon,
