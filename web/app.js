@@ -4721,6 +4721,16 @@ function placeIcon({ x, y, iconId, label, forceCanvas = false }) {
       showStartModal(drop, false);
       return;
     }
+    // Cell Culture: a vessel/dish/starting-material node IS its culture record —
+    // double-clicking it opens the record editor (the label intercepts dblclick
+    // before it can reach the node-level handler, so the branch lives here too).
+    if (getNodeWorkspace(drop) === "cell-culture" && window.WLPCulture) {
+      const iconId = String(drop.dataset.iconId || "");
+      if (isVesselOrDishNode(drop) || iconId === "cell_line" || iconId === "primary_tissue") {
+        window.WLPCulture.openRecord(drop);
+        return;
+      }
+    }
     enableLabelEditing(nameInput);
   });
   nameInput.addEventListener("input", () => {
