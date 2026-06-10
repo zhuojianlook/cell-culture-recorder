@@ -226,43 +226,41 @@
     });
   }
 
-  var grid = null;
+  var view = null;
 
-  function buildGrid() {
-    if (grid) return grid;
-    var el = document.createElement("div");
-    el.id = "wlpcGrid";
-    el.className = "modal-backdrop is-hidden";
-    el.style.cssText =
-      "position:fixed;inset:0;z-index:9000;background:rgba(2,6,23,.78);display:none;" +
-      "padding:4vh 4vw;overflow:auto";
-    el.innerHTML =
-      '<div style="max-width:1100px;margin:0 auto;background:#0f172a;border:1px solid rgba(148,163,184,.18);' +
-      'border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.5)">' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;' +
-        'border-bottom:1px solid rgba(148,163,184,.14)">' +
-          '<div><h2 style="margin:0;font-size:1.1rem;color:#e5e7eb">Cell Culture Records</h2>' +
-          '<div id="wlpcGridSub" style="font-size:.8125rem;color:#94a3b8;margin-top:2px"></div></div>' +
-          '<button type="button" id="wlpcGridClose" class="btn">Back to timeline</button>' +
-        '</div>' +
-        '<div id="wlpcGridBody" style="padding:8px 14px 18px"></div>' +
-      '</div>';
-    document.body.appendChild(el);
-    el.querySelector("#wlpcGridClose").onclick = closeGrid;
-    el.addEventListener("click", function (e) { if (e.target === el) closeGrid(); });
-    grid = el;
-    return el;
+  // The recorder is rendered inline in the workspace area (where the canvas
+  // lives) whenever the "Cell Culture Recorder" workspace tab is active.
+  function buildView() {
+    if (view) return view;
+    var workspace = document.querySelector(".workspace");
+    if (!workspace) return null;
+    view = document.createElement("section");
+    view.id = "wlpcRecordsView";
+    view.style.cssText =
+      "flex:1;margin:18px;border:1px solid rgba(148,163,184,.18);border-radius:18px;" +
+      "background:#0b1220;overflow:auto;display:none";
+    view.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;' +
+      'border-bottom:1px solid rgba(148,163,184,.12);position:sticky;top:0;background:#0b1220;z-index:1">' +
+        '<div><h2 style="margin:0;font-size:1.15rem;color:#e5e7eb">Cell Culture Records</h2>' +
+        '<div id="wlpcGridSub" style="font-size:.8125rem;color:#94a3b8;margin-top:2px"></div></div>' +
+      '</div>' +
+      '<div id="wlpcGridBody" style="padding:8px 16px 22px"></div>';
+    workspace.appendChild(view);
+    return view;
   }
 
   function renderGrid() {
-    var body = grid.querySelector("#wlpcGridBody");
+    if (!buildView()) return;
+    var body = view.querySelector("#wlpcGridBody");
     var vessels = allCultureVessels().sort(compareNodes);
-    grid.querySelector("#wlpcGridSub").textContent =
+    view.querySelector("#wlpcGridSub").textContent =
       vessels.length + (vessels.length === 1 ? " vessel" : " vessels") + " in this project";
     if (!vessels.length) {
       body.innerHTML =
-        '<p style="color:#94a3b8;padding:24px;text-align:center">No vessels yet. Drop a flask, dish, ' +
-        'or cell line onto the Cell Culture timeline, then double-click it to add its record.</p>';
+        '<p style="color:#94a3b8;padding:40px 24px;text-align:center;line-height:1.6">No vessels yet.<br>' +
+        'Switch to the <strong style="color:#e5e7eb">Cell Culture</strong> tab, drop a flask/dish/cell line ' +
+        "onto the timeline, then double-click it to add its record.</p>";
       return;
     }
     var rows = vessels.map(function (n) {
@@ -299,9 +297,13 @@
         var id = tr.getAttribute("data-node-id");
         var node = document.querySelector('.drop[data-node-id="' + id + '"]');
         if (!node) return;
-        closeGrid();
-        if (typeof window.wlpFocusNode === "function") window.wlpFocusNode(id);
-        setTimeout(function () { openRecord(node); }, 60);
+        // Jump to the Cell Culture timeline, focus the vessel, open its record.
+        if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("cell-culture");
+        syncView();
+        setTimeout(function () {
+          if (typeof window.wlpFocusNode === "function") window.wlpFocusNode(id);
+          openRecord(node);
+        }, 80);
       });
     });
   }
@@ -314,58 +316,48 @@
     return p ? esc(nodeLabel(p)) : "";
   }
 
-  function openGrid() {
-    buildGrid();
-    renderGrid();
-    grid.classList.remove("is-hidden");
-    grid.style.display = "block";
-  }
-  function closeGrid() {
-    if (!grid) return;
-    grid.classList.add("is-hidden");
-    grid.style.display = "none";
-  }
-
-  // Inject a "Records" toggle into the workspace toolbar, visible only while the
-  // Cell Culture workspace is active.
-  function injectRecordsButton() {
+  // Show the records view (and hide the canvas + palette) while the recorder
+  // workspace tab is active; restore them otherwise.
+  var canvasEl = null;
+  var paletteEl = null;
+  function syncView() {
+    var ws = typeof window.wlpActiveWorkspace === "function" ? window.wlpActiveWorkspace() : "";
+    var isRecorder = ws === "culture-records";
+    if (!canvasEl) canvasEl = document.getElementById("canvas");
+    if (!paletteEl) paletteEl = document.querySelector(".palette");
+    var logEl = document.querySelector(".log-panel");
+    // The timeline controls (Today / zoom) are irrelevant in the grid, but the
+    // workspace TABS live in the toolbar too — hide only the actions, not the bar.
     var actions = document.querySelector(".workspace__actions");
-    if (!actions || document.getElementById("wlpcRecordsBtn")) return;
-    var btn = document.createElement("button");
-    btn.id = "wlpcRecordsBtn";
-    btn.type = "button";
-    btn.textContent = "🧫 Records";
-    btn.title = "Cell culture records for this project";
-    btn.style.display = "none";
-    btn.onclick = openGrid;
-    actions.insertBefore(btn, actions.firstChild);
-    function sync() {
-      var ws = typeof window.wlpActiveWorkspace === "function" ? window.wlpActiveWorkspace() : "";
-      btn.style.display = ws === "cell-culture" ? "" : "none";
+    if (isRecorder) {
+      renderGrid();
+      if (view) view.style.display = "block";
+      if (canvasEl) canvasEl.style.display = "none";
+      if (paletteEl) paletteEl.style.display = "none";
+      if (logEl) logEl.style.display = "none";
+      if (actions) actions.style.visibility = "hidden";
+    } else {
+      if (view) view.style.display = "none";
+      if (canvasEl) canvasEl.style.display = "";
+      if (paletteEl) paletteEl.style.display = "";
+      if (logEl) logEl.style.display = "";
+      if (actions) actions.style.visibility = "";
     }
-    document.addEventListener("click", function (e) {
-      if (e.target && e.target.closest && e.target.closest(".workspace-tab")) setTimeout(sync, 50);
-    });
-    sync();
-    // Re-check periodically in case the workspace changes by other means.
-    setInterval(sync, 1500);
   }
 
+  document.addEventListener("click", function (e) {
+    if (e.target && e.target.closest && e.target.closest(".workspace-tab")) setTimeout(syncView, 60);
+  });
+  setInterval(syncView, 1200);
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", injectRecordsButton);
+    document.addEventListener("DOMContentLoaded", function () { setTimeout(syncView, 500); });
   } else {
-    injectRecordsButton();
+    setTimeout(syncView, 500);
   }
-  // The toolbar may render slightly after load; retry a few times.
-  var tries = 0;
-  var retry = setInterval(function () {
-    injectRecordsButton();
-    if (document.getElementById("wlpcRecordsBtn") || ++tries > 20) clearInterval(retry);
-  }, 500);
 
   window.WLPCulture = {
     openRecord: openRecord,
-    openGrid: openGrid,
+    showRecords: function () { if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("culture-records"); },
     read: read,
     statusColor: statusColor,
     vesselTypeFromIcon: vesselTypeFromIcon,

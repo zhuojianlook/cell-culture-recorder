@@ -108,6 +108,16 @@ const WORKSPACES = [
     paletteSubtitle: "Drag an icon into the canvas to place it.",
     tabs: CELL_PALETTE_TABS,
     icons: CELL_ICONS
+  },
+  {
+    // The recorder is a per-project ledger view of the Cell Culture vessels —
+    // no palette/canvas of its own; culture.js renders the grid when active.
+    id: "culture-records",
+    label: "Cell Culture Recorder",
+    paletteTitle: "Cell Culture Records",
+    paletteSubtitle: "Every culture vessel in this project.",
+    tabs: [],
+    icons: []
   }
 ];
 const WORKSPACE_BY_ID = WORKSPACES.reduce((acc, entry) => {
@@ -839,6 +849,7 @@ window.wlpFocusNode = function (nodeId) {
   try { focusNodeById(nodeId); } catch (e) { /* ignore */ }
 };
 window.wlpActiveWorkspace = function () { return activeWorkspaceId; };
+window.wlpSetWorkspace = function (id) { try { setActiveWorkspace(id); } catch (e) { /* ignore */ } };
 
 // ── Hash Router ──────────────────────────────────────────────────────
 function parseHashRoute() {
