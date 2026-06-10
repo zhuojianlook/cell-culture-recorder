@@ -327,8 +327,11 @@ pub fn run() {
             if !cfg!(debug_assertions) {
                 if let Ok(exe_path) = std::env::current_exe() {
                     if let Some(macos_dir) = exe_path.parent() {
-                        let sidecar_name = format!("api-server-{}-apple-darwin", std::env::consts::ARCH);
-                        let sidecar_path = macos_dir.join(&sidecar_name);
+                        // Tauri strips the target-triple suffix when bundling
+                        // externalBin, so the binary in Contents/MacOS is plain
+                        // "api-server" (matches the .sidecar("api-server") spawn
+                        // below) — NOT "api-server-<arch>-apple-darwin".
+                        let sidecar_path = macos_dir.join("api-server");
                         let _ = std::process::Command::new("xattr")
                             .args(["-cr", &sidecar_path.to_string_lossy().to_string()]).output();
                         let _ = std::process::Command::new("chmod")

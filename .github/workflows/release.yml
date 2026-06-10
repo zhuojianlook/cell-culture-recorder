@@ -57,6 +57,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Gate the release on the unit tests — a culture-logic regression should
+      # fail fast, before the long Rust/sidecar build.
+      - name: Run unit tests
+        run: node --test tests/
+
       # Build the Cell Culture Recorder sub-app (Vite, relative base) into
       # web/ccr/ so the integrated frontend can navigate to it. Must run before
       # tauri-action bundles frontendDist (../web).

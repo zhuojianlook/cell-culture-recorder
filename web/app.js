@@ -5926,6 +5926,13 @@ function handleDeleteSelection() {
   if (!selection) return;
   if (selection.type === "node") {
     removeConnectionsForNode(selection.id);
+    // Cell-culture lineage: clear any child's parent pointer before its parent
+    // node disappears, so lineage references don't dangle (P0/M2).
+    try {
+      canvas
+        .querySelectorAll('.drop[data-culture-parent-node-id="' + selection.id + '"]')
+        .forEach((child) => { delete child.dataset.cultureParentNodeId; });
+    } catch { /* */ }
     selection.el.remove();
     toggleHint();
     updateAllConnections();
@@ -15135,6 +15142,30 @@ function deserializeCanvasState(data) {
       });
     }
   });
+
+  // 9b. Cell-culture lineage integrity + nodeId counter (P0):
+  // - bump nodeIdCounter past every existing id so a freshly placed vessel can
+  //   never reuse an id that a lineage pointer still references (M3).
+  // - drop dangling cultureParentNodeId pointers whose parent node is gone (M2).
+  try {
+    const CL = window.WLPCultureLogic;
+    if (CL) {
+      const allIds = [];
+      canvas.querySelectorAll(".drop[data-node-id]").forEach((n) => allIds.push(n.dataset.nodeId || ""));
+      nodeIdCounter = CL.nextNodeIdCounter(allIds, nodeIdCounter);
+      const records = [];
+      const byId = {};
+      canvas.querySelectorAll('.drop[data-workspace="cell-culture"]').forEach((n) => {
+        const rec = { nodeId: n.dataset.nodeId || "", parentNodeId: n.dataset.cultureParentNodeId || "" };
+        records.push(rec);
+        byId[rec.nodeId] = n;
+      });
+      CL.danglingChildIds(records).forEach((cid) => {
+        const n = byId[cid];
+        if (n) delete n.dataset.cultureParentNodeId;
+      });
+    }
+  } catch { /* */ }
 
   // 10. Update all visual state
   try { updateTimelineLayout(); } catch { /* */ }

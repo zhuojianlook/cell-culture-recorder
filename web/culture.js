@@ -20,15 +20,23 @@
     else node.dataset["culture" + key] = String(val);
   }
 
-  function vesselTypeFromIcon(node) {
-    var id = String(node.dataset.iconId || "");
-    var map = {
-      t25_flask: "T25 flask", t75_flask: "T75 flask", t150_flask: "T150 flask",
-      t175_flask: "T175 flask", t225_flask: "T225 flask", t300_flask: "T300 flask",
-      dish_35mm: "35mm dish", dish_60mm: "60mm dish", dish_100mm: "100mm dish", dish_150mm: "150mm dish",
-      cell_line: "Cell line", primary_tissue: "Primary tissue"
+  // Pure logic lives in culture-logic.js (window.WLPCultureLogic) so it's
+  // unit-tested; culture.js is the DOM glue. recordOf() projects a node's
+  // dataset into the plain {nodeId,donor,...} record those functions expect.
+  function LOGIC() { return window.WLPCultureLogic; }
+  function recordOf(node) {
+    return {
+      nodeId: node.dataset.nodeId || "",
+      donor: read(node, "Donor", ""),
+      eye: read(node, "Eye", ""),
+      passage: read(node, "Passage", ""),
+      seedDate: read(node, "SeedDate", ""),
+      status: read(node, "Status", "active"),
+      parentNodeId: read(node, "ParentNodeId", ""),
     };
-    return map[id] || id || "Vessel";
+  }
+  function vesselTypeFromIcon(node) {
+    return LOGIC().vesselTypeFromIcon(node.dataset.iconId);
   }
 
   function otherVessels(node) {
@@ -131,12 +139,17 @@
     val("wlpcIncubator").value = read(node, "Incubator", "");
     val("wlpcSeedDate").value = read(node, "SeedDate", "");
     val("wlpcNotes").value = read(node, "Notes", "");
-    // Lineage parent options
+    // Lineage parent options — exclude vessels that would form a cycle
+    // (this node's own descendants).
     var sel = val("wlpcParent");
     sel.innerHTML = '<option value="">— none —</option>';
+    var allRecords = allCultureVessels().map(recordOf);
+    var selfId = node.dataset.nodeId || "";
     otherVessels(node).forEach(function (n) {
+      var cid = n.dataset.nodeId || "";
+      if (LOGIC().wouldCreateCycle(allRecords, selfId, cid)) return;
       var opt = document.createElement("option");
-      opt.value = n.dataset.nodeId || "";
+      opt.value = cid;
       opt.textContent = nodeLabel(n);
       sel.appendChild(opt);
     });
@@ -167,16 +180,16 @@
     write(node, "ParentNodeId", val("wlpcParent").value);
     write(node, "Notes", val("wlpcNotes").value.trim());
 
-    // Reflect the culture identity on the canvas node label (so the timeline
-    // shows what each vessel is). Only when a donor is set.
-    var donor = read(node, "Donor", "");
-    if (donor) {
-      var eye = read(node, "Eye", "");
-      var p = read(node, "Passage", "");
-      var summary = donor + (eye && eye !== "unknown" ? " " + eye : "") + (p !== "" ? " P" + p : "");
+    // Reflect the culture identity on the canvas node label (e.g. "6769 OD P2")
+    // — but DON'T clobber a name the user typed. Only overwrite when the label
+    // is blank or still equals the summary we last auto-generated (tracked in
+    // dataset.cultureLabelAuto, which persists with the node).
+    var summary = LOGIC().cultureLabelSummary(recordOf(node));
+    if (summary) {
       var ta = node.querySelector(".node-label");
-      if (ta) {
+      if (ta && LOGIC().shouldOverwriteLabel(ta.value, node.dataset.cultureLabelAuto, vesselTypeFromIcon(node))) {
         ta.value = summary;
+        node.dataset.cultureLabelAuto = summary;
         ta.dispatchEvent(new Event("input", { bubbles: true }));
         ta.dispatchEvent(new Event("change", { bubbles: true }));
       }
@@ -205,19 +218,11 @@
   }
 
   function warningsFor(node) {
-    var w = [];
-    if (!read(node, "Donor", "")) w.push("no donor");
-    if (!read(node, "SeedDate", "")) w.push("no seed date");
-    return w;
+    return LOGIC().cultureWarnings(recordOf(node));
   }
 
   function compareNodes(a, b) {
-    return (
-      read(a, "Donor", "").localeCompare(read(b, "Donor", "")) ||
-      read(a, "Eye", "").localeCompare(read(b, "Eye", "")) ||
-      (Number(read(a, "Passage", "0")) - Number(read(b, "Passage", "0"))) ||
-      read(a, "SeedDate", "").localeCompare(read(b, "SeedDate", ""))
-    );
+    return LOGIC().compareCultureRecords(recordOf(a), recordOf(b));
   }
 
   function esc(s) {

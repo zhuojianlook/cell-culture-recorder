@@ -1,0 +1,20 @@
+name: Tests
+
+# Fast unit-test run on every push / PR. The tests are pure JS (Node's built-in
+# runner, no dependencies), so this needs nothing but Node — runs in seconds.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run unit tests
+        run: node --test tests/
