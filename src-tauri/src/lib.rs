@@ -71,8 +71,35 @@ fn get_sidecar_error(state: tauri::State<'_, SidecarError>) -> Option<String> {
     state.0.lock().unwrap().clone()
 }
 
+fn build_proxy_request(
+    client: &reqwest::Client,
+    method: &str,
+    url: &str,
+    body: &Option<String>,
+) -> Option<reqwest::RequestBuilder> {
+    let with_body = |mut r: reqwest::RequestBuilder| {
+        if let Some(b) = body {
+            r = r.header("Content-Type", "application/json").body(b.clone());
+        }
+        r
+    };
+    Some(match method {
+        "GET" => client.get(url),
+        "POST" => with_body(client.post(url)),
+        "PUT" => with_body(client.put(url)),
+        "PATCH" => with_body(client.patch(url)),
+        "DELETE" => with_body(client.delete(url)),
+        _ => return None,
+    })
+}
+
 /// Proxy an HTTP request to the sidecar from Rust, returning the raw body text.
 /// This is the single networking chokepoint the frontend's apiFetch() uses.
+///
+/// Connection failures are retried for a few seconds: the bundled Node sidecar
+/// takes a moment to cold-start, so the first requests after launch can hit a
+/// not-yet-listening port. Without this, the dashboard's initial load and an
+/// immediate "New Project" click fail with "error sending request".
 #[tauri::command]
 async fn proxy_request(
     method: String,
@@ -83,39 +110,34 @@ async fn proxy_request(
     let port = state.0;
     let url = format!("http://127.0.0.1:{}{}", port, path);
     let client = reqwest::Client::new();
+    let method_up = method.to_uppercase();
 
-    let req = match method.to_uppercase().as_str() {
-        "GET" => client.get(&url),
-        "POST" => {
-            let mut r = client.post(&url);
-            if let Some(b) = body { r = r.header("Content-Type", "application/json").body(b); }
-            r
+    let mut last_err = String::new();
+    for attempt in 0..24u32 {
+        let req = match build_proxy_request(&client, &method_up, &url, &body) {
+            Some(r) => r,
+            None => return Err(format!("Unsupported method: {}", method)),
+        };
+        match req.send().await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                let text = resp
+                    .text()
+                    .await
+                    .map_err(|e| format!("Failed to read response: {}", e))?;
+                // {status, body} envelope so the frontend recovers the real HTTP
+                // status for every response. Err is reserved for transport failure.
+                return Ok(serde_json::json!({ "status": status, "body": text }).to_string());
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                if attempt < 23 {
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                }
+            }
         }
-        "PUT" => {
-            let mut r = client.put(&url);
-            if let Some(b) = body { r = r.header("Content-Type", "application/json").body(b); }
-            r
-        }
-        "PATCH" => {
-            let mut r = client.patch(&url);
-            if let Some(b) = body { r = r.header("Content-Type", "application/json").body(b); }
-            r
-        }
-        "DELETE" => {
-            let mut r = client.delete(&url);
-            if let Some(b) = body { r = r.header("Content-Type", "application/json").body(b); }
-            r
-        }
-        _ => return Err(format!("Unsupported method: {}", method)),
-    };
-
-    let resp = req.send().await.map_err(|e| format!("Request failed: {}", e))?;
-    let status = resp.status().as_u16();
-    let text = resp.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
-    // Return a {status, body} envelope so the frontend can recover the real
-    // HTTP status for every response (2xx and errors alike). Err is reserved
-    // for transport failures (sidecar down / connection refused).
-    Ok(serde_json::json!({ "status": status, "body": text }).to_string())
+    }
+    Err(format!("Local server not reachable: {}", last_err))
 }
 
 /// Multipart upload proxy (CSV import etc.) — base64 file payloads from JS.

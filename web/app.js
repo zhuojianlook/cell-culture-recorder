@@ -615,11 +615,20 @@ async function apiFetch(path, options = {}) {
       if (status === 401 && !skipAuth) clearApiSession();
       return { ok, status, data, response: null };
     } catch (err) {
-      // Transport failure (sidecar down / connection refused).
+      // Transport failure (sidecar down / connection refused after retries).
+      // Pull the sidecar's own startup/exit error, if any, so the cause is
+      // visible instead of a bare "error sending request".
+      let detail = String((err && err.message) || err);
+      try {
+        const se = await invoke("get_sidecar_error");
+        if (se) detail += " — local server: " + String(se);
+      } catch {
+        /* ignore */
+      }
       return {
         ok: false,
         status: 0,
-        data: { error: String((err && err.message) || err) },
+        data: { error: detail },
         response: null,
       };
     }

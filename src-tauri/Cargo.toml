@@ -1,6 +1,6 @@
 [package]
 name = "cell-culture-recorder"
-version = "0.2.3"
+version = "0.2.4"
 description = "WetLab Planner — integrated lab planning + cell culture recorder"
 authors = ["zhuojian"]
 edition = "2021"
@@ -26,3 +26,4 @@ tauri-plugin-log = "2"
 log = "0.4"
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 url = "2"
+tokio = { version = "1", features = ["time"] }
