@@ -850,6 +850,39 @@ window.wlpFocusNode = function (nodeId) {
 };
 window.wlpActiveWorkspace = function () { return activeWorkspaceId; };
 window.wlpSetWorkspace = function (id) { try { setActiveWorkspace(id); } catch (e) { /* ignore */ } };
+// Create a Cell Culture vessel node from imported fields, laid out in a grid by
+// `index`, with no placement modal. Returns the new node id. The caller should
+// be on the cell-culture workspace (so the node is tagged + visible there).
+window.wlpCreateCultureVessel = function (fields, index) {
+  fields = fields || {};
+  index = Number(index) || 0;
+  var cols = 8;
+  var x = 60 + (index % cols) * 110;
+  var y = 70 + Math.floor(index / cols) * 110;
+  var drop = placeIcon({
+    x: x, y: y,
+    iconId: fields.iconId || "t75_flask",
+    label: fields.label || "",
+    forceCanvas: true,
+    skipStartModal: true,
+  });
+  if (!drop) return null;
+  var set = function (k, v) { if (v != null && String(v) !== "") drop.dataset["culture" + k] = String(v); };
+  set("Donor", fields.donor);
+  set("Eye", fields.eye);
+  set("Passage", fields.passage);
+  set("SeedDate", fields.seedDate);
+  set("Medium", fields.medium);
+  set("Status", fields.status);
+  set("Notes", fields.notes);
+  // If no explicit label, set the node label to the culture identity.
+  var ta = drop.querySelector(".node-label");
+  if (ta && !fields.label && window.WLPCultureLogic) {
+    var summary = window.WLPCultureLogic.cultureLabelSummary({ donor: fields.donor, eye: fields.eye, passage: fields.passage });
+    if (summary) { ta.value = summary; drop.dataset.cultureLabelAuto = summary; }
+  }
+  return drop.dataset.nodeId;
+};
 
 // ── Hash Router ──────────────────────────────────────────────────────
 function parseHashRoute() {
@@ -4584,7 +4617,7 @@ function handleDrop(event) {
   lastDragData = null;
 }
 
-function placeIcon({ x, y, iconId, label, forceCanvas = false }) {
+function placeIcon({ x, y, iconId, label, forceCanvas = false, skipStartModal = false }) {
   const iconDef = getIconDefinition(iconId, label);
   const isPlanningTask = activeWorkspaceId === "planning" && iconDef?.iconKind === "planning-task";
   const isAnimalWorkspace = activeWorkspaceId === "animal-work";
@@ -4824,7 +4857,7 @@ function placeIcon({ x, y, iconId, label, forceCanvas = false }) {
     return drop;
   }
 
-  showStartModal(drop, true);
+  if (!skipStartModal) showStartModal(drop, true);
   return drop;
 }
 

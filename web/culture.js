@@ -381,16 +381,31 @@
       'border-bottom:1px solid rgba(148,163,184,.12);position:sticky;top:0;background:#0b1220;z-index:1">' +
         '<div><h2 style="margin:0;font-size:1.15rem;color:#e5e7eb">Cell Culture Records</h2>' +
         '<div id="wlpcGridSub" style="font-size:.8125rem;color:#94a3b8;margin-top:2px"></div></div>' +
-        '<div style="display:flex;border:1px solid rgba(148,163,184,.25);border-radius:8px;overflow:hidden">' +
-          '<button type="button" id="wlpcModeTable" class="btn" style="border:0;border-radius:0;padding:6px 14px">Table</button>' +
-          '<button type="button" id="wlpcModeTree" class="btn" style="border:0;border-radius:0;padding:6px 14px">Tree</button>' +
+        '<div style="display:flex;align-items:center;gap:10px">' +
+          '<button type="button" id="wlpcImport" class="btn" title="Import vessels from a CSV file">Import CSV</button>' +
+          '<input type="file" id="wlpcImportFile" accept=".csv,text/csv" style="display:none">' +
+          '<div style="display:flex;border:1px solid rgba(148,163,184,.25);border-radius:8px;overflow:hidden">' +
+            '<button type="button" id="wlpcModeTable" class="btn" style="border:0;border-radius:0;padding:6px 14px">Table</button>' +
+            '<button type="button" id="wlpcModeTree" class="btn" style="border:0;border-radius:0;padding:6px 14px">Tree</button>' +
+          '</div>' +
         '</div>' +
       '</div>' +
+      '<div id="wlpcImportStatus" style="display:none;margin:0 16px;padding:8px 12px;border-radius:8px;' +
+        'background:rgba(94,234,212,.12);color:#5eead4;font-size:.82rem"></div>' +
       '<div id="wlpcGridBody" style="padding:8px 16px 22px"></div>';
     workspace.appendChild(view);
     var setMode = function (m) { viewMode = m; updateModeButtons(); renderView(); };
     view.querySelector("#wlpcModeTable").onclick = function () { setMode("table"); };
     view.querySelector("#wlpcModeTree").onclick = function () { setMode("tree"); };
+    var fileInput = view.querySelector("#wlpcImportFile");
+    view.querySelector("#wlpcImport").onclick = function () { fileInput.value = ""; fileInput.click(); };
+    fileInput.onchange = function () {
+      var f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function () { runCsvImport(String(reader.result || "")); };
+      reader.readAsText(f);
+    };
     updateModeButtons();
     return view;
   }
@@ -494,6 +509,68 @@
         openRecord(node);
       }, 80);
     });
+  }
+
+  // Candidate match keys for a draft, used to resolve a CSV's parent label to a
+  // just-created vessel (explicit label, culture identity, donor+passage forms).
+  function importLabelKeys(d) {
+    var norm = function (s) { return String(s || "").replace(/\s+/g, " ").trim().toLowerCase(); };
+    var keys = [];
+    if (d.label) keys.push(norm(d.label));
+    var summary = LOGIC().cultureLabelSummary(d);
+    if (summary) keys.push(norm(summary));
+    if (d.donor && d.passage !== "" && d.passage != null) {
+      keys.push(norm(d.donor + " p" + d.passage));
+      keys.push(norm(d.donor + " " + d.passage));
+    }
+    return keys;
+  }
+
+  function showImportStatus(msg, isError) {
+    if (!view) return;
+    var box = view.querySelector("#wlpcImportStatus");
+    if (!box) return;
+    box.style.display = "";
+    box.style.background = isError ? "rgba(252,165,165,.12)" : "rgba(94,234,212,.12)";
+    box.style.color = isError ? "#fca5a5" : "#5eead4";
+    box.textContent = msg;
+    setTimeout(function () { if (box) box.style.display = "none"; }, 6000);
+  }
+
+  function runCsvImport(text) {
+    var parsed = LOGIC().importCsvToDrafts(text);
+    if (!parsed.rowCount) { showImportStatus("No data rows found in that CSV.", true); return; }
+    if (typeof window.wlpCreateCultureVessel !== "function") { showImportStatus("Import unavailable in this build.", true); return; }
+    // Create the vessels on the Cell Culture timeline.
+    if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("cell-culture");
+    var created = parsed.drafts.map(function (d, i) {
+      return { draft: d, nodeId: window.wlpCreateCultureVessel(d, i) };
+    });
+    // Resolve parent labels to just-created vessels.
+    var byLabel = {};
+    created.forEach(function (c) {
+      importLabelKeys(c.draft).forEach(function (k) { if (k && !byLabel[k]) byLabel[k] = c.nodeId; });
+    });
+    var linked = 0;
+    created.forEach(function (c) {
+      var pl = String(c.draft.parentLabel || "").replace(/\s+/g, " ").trim().toLowerCase();
+      if (!pl) return;
+      var pid = byLabel[pl];
+      if (pid && pid !== c.nodeId) {
+        var node = document.querySelector('.drop[data-node-id="' + c.nodeId + '"]');
+        if (node) { node.dataset.cultureParentNodeId = pid; linked++; }
+      }
+    });
+    if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+    // Back to the recorder + re-render.
+    if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("culture-records");
+    setTimeout(function () {
+      renderView();
+      showImportStatus(
+        "Imported " + created.length + " vessel" + (created.length === 1 ? "" : "s") +
+        (linked ? " · " + linked + " linked to a parent" : "") + "."
+      );
+    }, 120);
   }
 
   // The lineage tree: donor/eye-grouped parent→child genealogy.

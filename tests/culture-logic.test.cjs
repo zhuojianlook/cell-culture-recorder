@@ -156,6 +156,74 @@ test("childrenOf returns direct children", () => {
   assert.deepEqual(L.childrenOf(recs, "n-4"), []);
 });
 
+test("parseCsv handles quotes, escaped quotes, CRLF, BOM", () => {
+  const csv = '﻿a,b,c\r\n1,"two, 2","say ""hi"""\n3,,5\n';
+  assert.deepEqual(L.parseCsv(csv), [
+    ["a", "b", "c"],
+    ["1", "two, 2", 'say "hi"'],
+    ["3", "", "5"],
+  ]);
+  assert.deepEqual(L.parseCsv(""), []);
+});
+
+test("coerceEye / coerceStatus normalize free text", () => {
+  assert.equal(L.coerceEye("Right"), "OD");
+  assert.equal(L.coerceEye("os"), "OS");
+  assert.equal(L.coerceEye("both"), "OU");
+  assert.equal(L.coerceEye("whatever"), "unknown");
+  assert.equal(L.coerceStatus("Cryo"), "frozen");
+  assert.equal(L.coerceStatus("contam"), "contaminated");
+  assert.equal(L.coerceStatus(""), "active");
+});
+
+test("coerceDate accepts ISO/named, refuses ambiguous", () => {
+  assert.equal(L.coerceDate("2026-05-10"), "2026-05-10");
+  assert.equal(L.coerceDate("2026/5/4"), "2026-05-04");
+  assert.equal(L.coerceDate("10 May 2026"), "2026-05-10");
+  assert.equal(L.coerceDate("May 10, 2026"), "2026-05-10");
+  assert.equal(L.coerceDate("5/4/2026"), null); // ambiguous: not guessed
+  assert.equal(L.coerceDate(""), null);
+  assert.equal(L.coerceDate("2026-13-40"), null); // invalid
+});
+
+test("vesselIconFromText maps free text to icon ids", () => {
+  assert.equal(L.vesselIconFromText("T75 flask"), "t75_flask");
+  assert.equal(L.vesselIconFromText("t-150"), "t150_flask");
+  assert.equal(L.vesselIconFromText("60mm dish"), "dish_60mm");
+  assert.equal(L.vesselIconFromText("petri dish"), "dish_60mm");
+  assert.equal(L.vesselIconFromText("primary tissue"), "primary_tissue");
+  assert.equal(L.vesselIconFromText("cell line"), "cell_line");
+  assert.equal(L.vesselIconFromText("???"), "t75_flask"); // default
+});
+
+test("autoMapImport maps headers (exact + fuzzy) without reuse", () => {
+  const m = L.autoMapImport(["Donor ID", "Eye", "Passage No", "Flask Type", "Seed Date", "Parent Flask"]);
+  assert.equal(m.donor, 0);
+  assert.equal(m.eye, 1);
+  assert.equal(m.passage, 2);
+  assert.equal(m.vessel, 3);
+  assert.equal(m.seedDate, 4);
+  assert.equal(m.parentLabel, 5);
+  assert.equal(m.medium, null); // absent
+});
+
+test("importCsvToDrafts produces normalized vessel drafts", () => {
+  const csv = [
+    "donor,eye,passage,flask,seed date,parent",
+    "6769,Right,P0,T75,2026-05-01,",
+    "6769,right,p1,t75,10 May 2026,6769 P0",
+  ].join("\n");
+  const out = L.importCsvToDrafts(csv);
+  assert.equal(out.rowCount, 2);
+  assert.deepEqual(out.drafts[0], {
+    donor: "6769", eye: "OD", passage: "0", label: "", iconId: "t75_flask",
+    seedDate: "2026-05-01", medium: "", status: "active", parentLabel: "", notes: "",
+  });
+  assert.equal(out.drafts[1].passage, "1");
+  assert.equal(out.drafts[1].seedDate, "2026-05-10");
+  assert.equal(out.drafts[1].parentLabel, "6769 P0");
+});
+
 test("buildLineageForest builds parent->child trees", () => {
   const recs = [
     { nodeId: "n-1", donor: "6769", eye: "OD", passage: "0", seedDate: "2026-05-01", label: "P0" },

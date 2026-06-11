@@ -209,6 +209,156 @@
     return false;
   }
 
+  // ─── CSV import ───────────────────────────────────────────────────────────
+  // RFC-4180 CSV parser (handles quotes, escaped quotes, CRLF, BOM). Ported from
+  // the original recorder's parseCsv.
+  function parseCsv(input) {
+    var text = str(input);
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    var rows = [], row = [], field = "", inQuotes = false, i = 0, n = text.length;
+    function endField() { row.push(field); field = ""; }
+    function endRow() { endField(); rows.push(row); row = []; }
+    while (i < n) {
+      var c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+          inQuotes = false; i += 1; continue;
+        }
+        field += c; i += 1; continue;
+      }
+      if (c === '"') { inQuotes = true; i += 1; }
+      else if (c === ",") { endField(); i += 1; }
+      else if (c === "\n") { endRow(); i += 1; }
+      else if (c === "\r") { if (text[i + 1] === "\n") i += 1; else { endRow(); i += 1; } }
+      else { field += c; i += 1; }
+    }
+    if (field.length > 0 || row.length > 0) endRow();
+    return rows.filter(function (r) { return r.some(function (cell) { return str(cell).trim() !== ""; }); });
+  }
+
+  function normalizeHeader(h) {
+    return str(h).trim().toLowerCase().replace(/[_\-/.]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function coerceEye(raw) {
+    var v = str(raw).trim().toLowerCase();
+    if (["od", "r", "right", "right eye", "oculus dexter", "dexter"].indexOf(v) >= 0) return "OD";
+    if (["os", "l", "left", "left eye", "oculus sinister", "sinister"].indexOf(v) >= 0) return "OS";
+    if (["ou", "both", "both eyes", "bilateral", "pooled"].indexOf(v) >= 0) return "OU";
+    return "unknown";
+  }
+  function coerceStatus(raw) {
+    var v = str(raw).trim().toLowerCase();
+    if (["frozen", "freeze", "cryo", "banked", "cryopreserved"].indexOf(v) >= 0) return "frozen";
+    if (["contaminated", "contamination", "contam", "infected"].indexOf(v) >= 0) return "contaminated";
+    if (["discarded", "discard", "disposed", "dead", "trashed", "binned"].indexOf(v) >= 0) return "discarded";
+    return "active";
+  }
+  var MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12,
+    january: 1, february: 2, march: 3, april: 4, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12 };
+  function validYmd(y, m, d) {
+    if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+    var dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }
+  function fmtYmd(y, m, d) {
+    function pad(x) { return (x < 10 ? "0" : "") + x; }
+    return validYmd(y, m, d) ? y + "-" + pad(m) + "-" + pad(d) : null;
+  }
+  // ISO YYYY-MM-DD or null when empty/ambiguous (a bare "5/4/2026" is NOT guessed).
+  function coerceDate(raw) {
+    var v = str(raw).trim();
+    if (!v) return null;
+    var iso = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (iso) return fmtYmd(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+    var ymd = v.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
+    if (ymd) return fmtYmd(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
+    var cleaned = v.replace(/,/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+    var m = cleaned.match(/^(\d{1,2})[ -]([a-z]+)[ -](\d{4})$/);
+    if (m && MONTHS[m[2]]) return fmtYmd(Number(m[3]), MONTHS[m[2]], Number(m[1]));
+    m = cleaned.match(/^([a-z]+)[ -](\d{1,2})[ -](\d{4})$/);
+    if (m && MONTHS[m[1]]) return fmtYmd(Number(m[3]), MONTHS[m[1]], Number(m[2]));
+    return null;
+  }
+
+  // Free vessel text -> a known iconId (default t75_flask).
+  function vesselIconFromText(text) {
+    var t = str(text).toLowerCase().replace(/[^a-z0-9]/g, "");
+    var m = t.match(/t(25|75|150|175|225|300)/);
+    if (m) return "t" + m[1] + "_flask";
+    m = t.match(/(\d+)mm/);
+    if (m && ["35", "60", "100", "150"].indexOf(m[1]) >= 0) return "dish_" + m[1] + "mm";
+    if (t.indexOf("dish") >= 0) return "dish_60mm";
+    if (t.indexOf("tissue") >= 0 || t.indexOf("primary") >= 0) return "primary_tissue";
+    if (t.indexOf("line") >= 0) return "cell_line";
+    return "t75_flask";
+  }
+
+  var IMPORT_FIELDS = [
+    { key: "donor", aliases: ["donor", "donor id", "donor identifier", "patient", "subject", "donornumber"] },
+    { key: "eye", aliases: ["eye", "laterality", "side", "od os"] },
+    { key: "passage", aliases: ["passage", "passage number", "passage no", "pn"] },
+    // vessel BEFORE label so a "flask"/"vessel" column claims the type, not the
+    // free-text label (whose "flask label" alias would otherwise fuzzy-grab it).
+    { key: "vessel", aliases: ["vessel", "flask", "flask type", "container", "format", "vessel type"] },
+    { key: "label", aliases: ["label", "vessel label", "flask label", "sample", "sample id", "name", "id"] },
+    { key: "seedDate", aliases: ["seed date", "seed", "seeded", "date seeded", "seeding date", "start date", "started", "p0 date"] },
+    { key: "medium", aliases: ["medium", "media"] },
+    { key: "status", aliases: ["status", "state"] },
+    { key: "parentLabel", aliases: ["parent", "parent label", "parent vessel", "mother", "from", "parent flask"] },
+    { key: "notes", aliases: ["notes", "comment", "comments", "growth notes", "note"] },
+  ];
+  function autoMapImport(headers) {
+    var normalized = (headers || []).map(normalizeHeader);
+    var used = {}, mapping = {};
+    IMPORT_FIELDS.forEach(function (field) {
+      var candidates = [normalizeHeader(field.key)].concat(field.aliases);
+      var found = null, i;
+      for (i = 0; i < normalized.length; i++) {
+        if (used[i]) continue;
+        if (candidates.indexOf(normalized[i]) >= 0) { found = i; break; }
+      }
+      if (found === null) {
+        for (i = 0; i < normalized.length; i++) {
+          if (used[i]) continue;
+          var h = normalized[i];
+          if (field.aliases.some(function (a) { return h.indexOf(a) >= 0 || (h.length >= 3 && a.indexOf(h) >= 0); })) { found = i; break; }
+        }
+      }
+      if (found !== null) used[found] = true;
+      mapping[field.key] = found;
+    });
+    return mapping;
+  }
+
+  // Parse CSV text into vessel drafts ({donor,eye,passage,label,iconId,seedDate,
+  // medium,status,parentLabel,notes}) plus the header mapping (for a preview).
+  function importCsvToDrafts(text) {
+    var rows = parseCsv(text);
+    if (rows.length < 2) return { drafts: [], headers: rows[0] || [], mapping: {}, rowCount: 0 };
+    var headers = rows[0];
+    var mapping = autoMapImport(headers);
+    function cell(row, key) { var i = mapping[key]; return i == null ? "" : str(row[i]).trim(); }
+    var drafts = rows.slice(1).map(function (row) {
+      var passageRaw = cell(row, "passage").replace(/^p\.?\s*/i, "");
+      var passageDigits = (passageRaw.match(/-?\d+/) || [""])[0];
+      return {
+        donor: cell(row, "donor"),
+        eye: coerceEye(cell(row, "eye")),
+        passage: passageDigits,
+        label: cell(row, "label"),
+        iconId: vesselIconFromText(cell(row, "vessel")),
+        seedDate: coerceDate(cell(row, "seedDate")) || "",
+        medium: cell(row, "medium"),
+        status: coerceStatus(cell(row, "status")),
+        parentLabel: cell(row, "parentLabel"),
+        notes: cell(row, "notes"),
+      };
+    });
+    return { drafts: drafts, headers: headers, mapping: mapping, rowCount: drafts.length };
+  }
+
   // ─── Lineage tree ─────────────────────────────────────────────────────────
   // Build a forest of parent→child trees from the records. Roots are vessels
   // with no parent (or a dangling parent). Children are sorted by passage then
@@ -315,6 +465,13 @@
     summarizeEvent: summarizeEvent,
     buildLineageForest: buildLineageForest,
     flattenForest: flattenForest,
+    parseCsv: parseCsv,
+    coerceEye: coerceEye,
+    coerceStatus: coerceStatus,
+    coerceDate: coerceDate,
+    vesselIconFromText: vesselIconFromText,
+    autoMapImport: autoMapImport,
+    importCsvToDrafts: importCsvToDrafts,
     VESSEL_TYPES: VESSEL_TYPES,
     vesselTypeFromIcon: vesselTypeFromIcon,
     isCultureVesselIcon: isCultureVesselIcon,
