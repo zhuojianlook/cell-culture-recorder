@@ -89,6 +89,18 @@
             '<label for="wlpcNotes">Growth notes</label>' +
             '<textarea id="wlpcNotes" class="modal__input" rows="2" style="resize:vertical"></textarea>' +
           '</div>' +
+          // Events / passaging log
+          '<div class="field" style="grid-column:1/-1">' +
+            '<label>Events &amp; passaging</label>' +
+            '<div id="wlpcEventsList" style="max-height:130px;overflow:auto;border:1px solid rgba(148,163,184,.18);border-radius:8px;background:rgba(2,6,23,.35)"></div>' +
+            '<div style="display:flex;gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap">' +
+              eventTypeSelect() +
+              '<input type="date" id="wlpcEvDate" class="modal__input" style="width:auto">' +
+              '<input type="number" id="wlpcEvConf" class="modal__input" placeholder="conf %" min="0" max="100" style="width:78px">' +
+              '<input type="text" id="wlpcEvNotes" class="modal__input" placeholder="notes (optional)" style="flex:1;min-width:90px">' +
+              '<button type="button" id="wlpcEvAdd" class="btn">+ Record</button>' +
+            '</div>' +
+          '</div>' +
           '<div id="wlpcErr" class="form-status" style="grid-column:1/-1;color:#fca5a5"></div>' +
         '</div>' +
         '<div class="modal__footer" style="display:flex;gap:8px;justify-content:flex-end;padding:14px 16px">' +
@@ -99,6 +111,7 @@
     document.body.appendChild(backdrop);
     backdrop.querySelector("#wlpcCancel").onclick = hide;
     backdrop.querySelector("#wlpcSave").onclick = save;
+    backdrop.querySelector("#wlpcEvAdd").onclick = recordEventFromForm;
     backdrop.addEventListener("click", function (e) { if (e.target === backdrop) hide(); });
     // Live needs-attention warnings as the user edits.
     backdrop.addEventListener("input", renderEditorWarnings);
@@ -137,6 +150,74 @@
       '<ul style="margin:0;padding-left:18px">' +
       w.map(function (x) { return "<li>" + esc(x.message) + "</li>"; }).join("") +
       "</ul>";
+  }
+
+  function eventTypeSelect() {
+    var o = window.WLPCultureLogic.EVENT_TYPES.map(function (t) {
+      var lbl = t.replace("_", " ");
+      lbl = lbl.charAt(0).toUpperCase() + lbl.slice(1);
+      return '<option value="' + t + '">' + lbl + "</option>";
+    }).join("");
+    return '<select id="wlpcEvType" class="modal__input" style="width:auto">' + o + "</select>";
+  }
+
+  function renderEvents(node) {
+    var list = val("wlpcEventsList");
+    if (!list) return;
+    var events = LOGIC().sortEvents(LOGIC().parseEvents(node.dataset.cultureEvents));
+    if (!events.length) {
+      list.innerHTML =
+        '<div style="color:#64748b;font-size:.78rem;padding:8px 10px">No events yet — record a passage, feed, freeze, etc.</div>';
+      return;
+    }
+    list.innerHTML = events
+      .map(function (ev) {
+        var detail = LOGIC().summarizeEvent(ev);
+        var notes = ev.notes ? " — " + esc(ev.notes) : "";
+        return (
+          '<div style="font-size:.78rem;padding:5px 10px;border-bottom:1px solid rgba(148,163,184,.08)">' +
+          '<span style="color:#5eead4;font-weight:600">' + esc(String(ev.type).replace("_", " ")) + "</span> " +
+          '<span style="color:#94a3b8">' + esc(ev.at || "") + (detail ? " · " + esc(detail) : "") + "</span>" +
+          esc(notes) +
+          "</div>"
+        );
+      })
+      .join("");
+  }
+
+  // Append an event from the mini-form, apply its status transition (and bump
+  // the passage number for a passage event). Events commit immediately (an
+  // appended log entry), independent of the modal's Save/Cancel.
+  function recordEventFromForm() {
+    if (!current) return;
+    var type = val("wlpcEvType").value;
+    var ev = {
+      type: type,
+      at: val("wlpcEvDate").value || new Date().toISOString().slice(0, 10),
+      confluence: val("wlpcEvConf").value || "",
+      notes: val("wlpcEvNotes").value.trim(),
+      seq: Date.now(),
+    };
+    var events = LOGIC().parseEvents(current.dataset.cultureEvents);
+    events.push(ev);
+    current.dataset.cultureEvents = JSON.stringify(events);
+    var next = LOGIC().statusFromEvent(ev);
+    if (next) {
+      write(current, "Status", next);
+      val("wlpcStatus").value = next;
+    }
+    if (type === "passage") {
+      // Bump from the in-progress field value (not the dataset, which only
+      // updates on Save), then reflect it in both the field and the dataset.
+      var p = (Number(val("wlpcPassage").value) || 0) + 1;
+      val("wlpcPassage").value = String(p);
+      write(current, "Passage", String(p));
+    }
+    val("wlpcEvNotes").value = "";
+    val("wlpcEvConf").value = "";
+    renderEvents(current);
+    renderEditorWarnings();
+    if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
   }
 
   function fieldText(id, label) {
@@ -195,6 +276,10 @@
       sel.appendChild(opt);
     });
     sel.value = read(node, "ParentNodeId", "");
+    val("wlpcEvDate").value = "";
+    val("wlpcEvConf").value = "";
+    val("wlpcEvNotes").value = "";
+    renderEvents(node);
     modal.classList.remove("is-hidden");
     modal.style.display = "flex";
     renderEditorWarnings();

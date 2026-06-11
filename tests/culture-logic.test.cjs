@@ -156,6 +156,41 @@ test("childrenOf returns direct children", () => {
   assert.deepEqual(L.childrenOf(recs, "n-4"), []);
 });
 
+test("parseEvents is tolerant of bad input", () => {
+  assert.deepEqual(L.parseEvents('[{"type":"feed"}]'), [{ type: "feed" }]);
+  assert.deepEqual(L.parseEvents(""), []);
+  assert.deepEqual(L.parseEvents(null), []);
+  assert.deepEqual(L.parseEvents("not json"), []);
+  assert.deepEqual(L.parseEvents('{"not":"array"}'), []);
+});
+
+test("statusFromEvent maps event types to status transitions", () => {
+  assert.equal(L.statusFromEvent({ type: "freeze" }), "frozen");
+  assert.equal(L.statusFromEvent({ type: "contamination" }), "contaminated");
+  assert.equal(L.statusFromEvent({ type: "discard" }), "discarded");
+  assert.equal(L.statusFromEvent({ type: "thaw" }), "active");
+  assert.equal(L.statusFromEvent({ type: "passage" }), null);
+  assert.equal(L.statusFromEvent({ type: "feed" }), null);
+  assert.equal(L.statusFromEvent({ type: "passage", nextStatus: "discarded" }), "discarded");
+  assert.equal(L.statusFromEvent({}), null);
+});
+
+test("sortEvents orders newest-first by date then seq", () => {
+  const evs = [
+    { type: "feed", at: "2026-05-01", seq: 1 },
+    { type: "passage", at: "2026-05-10", seq: 2 },
+    { type: "freeze", at: "2026-05-10", seq: 3 },
+  ];
+  const order = L.sortEvents(evs).map((e) => e.type);
+  assert.deepEqual(order, ["freeze", "passage", "feed"]);
+});
+
+test("summarizeEvent builds a compact detail string", () => {
+  assert.equal(L.summarizeEvent({ confluence: "80", splitRatio: "1:3", operator: "ZL" }), "80% conf · split 1:3 · ZL");
+  assert.equal(L.summarizeEvent({ type: "feed" }), "");
+  assert.equal(L.summarizeEvent({ viability: "95" }), "95% via");
+});
+
 test("wouldCreateCycle blocks lineage cycles", () => {
   const recs = [
     { nodeId: "n-1", parentNodeId: "" },

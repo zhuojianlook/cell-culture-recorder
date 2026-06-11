@@ -209,7 +209,57 @@
     return false;
   }
 
+  // ─── Events / passaging ───────────────────────────────────────────────────
+  // An event is { type, at (YYYY-MM-DD), confluence, viability, splitRatio,
+  // medium, operator, notes, seq }. Stored as a JSON array on
+  // node.dataset.cultureEvents. Ported from the original recorder's event model.
+  var EVENT_TYPES = ["passage", "feed", "media_change", "observation", "freeze", "thaw", "contamination", "discard"];
+
+  function parseEvents(json) {
+    try {
+      var a = JSON.parse(str(json) || "[]");
+      return Array.isArray(a) ? a : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // The vessel status an event implies, or null for no change.
+  function statusFromEvent(ev) {
+    ev = ev || {};
+    if (ev.nextStatus) return ev.nextStatus;
+    if (ev.type === "freeze") return "frozen";
+    if (ev.type === "contamination") return "contaminated";
+    if (ev.type === "discard") return "discarded";
+    if (ev.type === "thaw") return "active";
+    return null;
+  }
+
+  // Newest first (by date, then insertion seq).
+  function sortEvents(events) {
+    return (events || []).slice().sort(function (a, b) {
+      return str(b.at).localeCompare(str(a.at)) || ((Number(b.seq) || 0) - (Number(a.seq) || 0));
+    });
+  }
+
+  // A short human summary of an event for the timeline.
+  function summarizeEvent(ev) {
+    ev = ev || {};
+    var bits = [];
+    if (ev.confluence !== "" && ev.confluence != null) bits.push(str(ev.confluence) + "% conf");
+    if (ev.viability !== "" && ev.viability != null) bits.push(str(ev.viability) + "% via");
+    if (ev.splitRatio) bits.push("split " + str(ev.splitRatio));
+    if (ev.medium) bits.push(str(ev.medium));
+    if (ev.operator) bits.push(str(ev.operator));
+    return bits.join(" · ");
+  }
+
   return {
+    EVENT_TYPES: EVENT_TYPES,
+    parseEvents: parseEvents,
+    statusFromEvent: statusFromEvent,
+    sortEvents: sortEvents,
+    summarizeEvent: summarizeEvent,
     VESSEL_TYPES: VESSEL_TYPES,
     vesselTypeFromIcon: vesselTypeFromIcon,
     isCultureVesselIcon: isCultureVesselIcon,
