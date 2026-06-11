@@ -556,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "cell-culture-recorder"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "log",
  "reqwest 0.12.28",

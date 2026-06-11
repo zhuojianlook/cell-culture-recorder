@@ -28,6 +28,7 @@
     var ta = node.querySelector(".node-label");
     return {
       nodeId: node.dataset.nodeId || "",
+      iconId: node.dataset.iconId || "",
       label: (ta && ta.value) || "",
       donor: read(node, "Donor", ""),
       eye: read(node, "Eye", ""),
@@ -265,11 +266,11 @@
     // (this node's own descendants).
     var sel = val("wlpcParent");
     sel.innerHTML = '<option value="">— none —</option>';
-    var allRecords = allCultureVessels().map(recordOf);
+    var peerRecords = allRecords();
     var selfId = node.dataset.nodeId || "";
     otherVessels(node).forEach(function (n) {
       var cid = n.dataset.nodeId || "";
-      if (LOGIC().wouldCreateCycle(allRecords, selfId, cid)) return;
+      if (LOGIC().wouldCreateCycle(peerRecords, selfId, cid)) return;
       var opt = document.createElement("option");
       opt.value = cid;
       opt.textContent = nodeLabel(n);
@@ -362,6 +363,7 @@
   }
 
   var view = null;
+  var viewMode = "table"; // "table" | "tree"
 
   // The recorder is rendered inline in the workspace area (where the canvas
   // lives) whenever the "Cell Culture Recorder" workspace tab is active.
@@ -379,10 +381,29 @@
       'border-bottom:1px solid rgba(148,163,184,.12);position:sticky;top:0;background:#0b1220;z-index:1">' +
         '<div><h2 style="margin:0;font-size:1.15rem;color:#e5e7eb">Cell Culture Records</h2>' +
         '<div id="wlpcGridSub" style="font-size:.8125rem;color:#94a3b8;margin-top:2px"></div></div>' +
+        '<div style="display:flex;border:1px solid rgba(148,163,184,.25);border-radius:8px;overflow:hidden">' +
+          '<button type="button" id="wlpcModeTable" class="btn" style="border:0;border-radius:0;padding:6px 14px">Table</button>' +
+          '<button type="button" id="wlpcModeTree" class="btn" style="border:0;border-radius:0;padding:6px 14px">Tree</button>' +
+        '</div>' +
       '</div>' +
       '<div id="wlpcGridBody" style="padding:8px 16px 22px"></div>';
     workspace.appendChild(view);
+    var setMode = function (m) { viewMode = m; updateModeButtons(); renderView(); };
+    view.querySelector("#wlpcModeTable").onclick = function () { setMode("table"); };
+    view.querySelector("#wlpcModeTree").onclick = function () { setMode("tree"); };
+    updateModeButtons();
     return view;
+  }
+  function updateModeButtons() {
+    if (!view) return;
+    var on = "#134e4a", onText = "#5eead4", off = "transparent", offText = "#94a3b8";
+    var t = view.querySelector("#wlpcModeTable"), r = view.querySelector("#wlpcModeTree");
+    if (t) { t.style.background = viewMode === "table" ? on : off; t.style.color = viewMode === "table" ? onText : offText; }
+    if (r) { r.style.background = viewMode === "tree" ? on : off; r.style.color = viewMode === "tree" ? onText : offText; }
+  }
+  function renderView() {
+    if (viewMode === "tree") renderTree();
+    else renderGrid();
   }
 
   function renderGrid() {
@@ -454,6 +475,75 @@
     return p ? esc(nodeLabel(p)) : "";
   }
 
+  function recordName(r) {
+    return (r.label && r.label.trim()) || LOGIC().cultureLabelSummary(r) || r.nodeId;
+  }
+
+  // Wire a clickable row/tree-node -> jump to the Cell Culture timeline + edit.
+  function wireRowClick(el) {
+    el.addEventListener("mouseenter", function () { el.style.background = "rgba(148,163,184,.06)"; });
+    el.addEventListener("mouseleave", function () { el.style.background = ""; });
+    el.addEventListener("click", function () {
+      var id = el.getAttribute("data-node-id");
+      var node = document.querySelector('.drop[data-node-id="' + id + '"]');
+      if (!node) return;
+      if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("cell-culture");
+      syncView();
+      setTimeout(function () {
+        if (typeof window.wlpFocusNode === "function") window.wlpFocusNode(id);
+        openRecord(node);
+      }, 80);
+    });
+  }
+
+  // The lineage tree: donor/eye-grouped parent→child genealogy.
+  function renderTree() {
+    if (!buildView()) return;
+    var body = view.querySelector("#wlpcGridBody");
+    var records = allRecords();
+    var flagged = records.filter(function (r) { return LOGIC().cultureWarnings(r, records).length; }).length;
+    view.querySelector("#wlpcGridSub").textContent =
+      records.length + (records.length === 1 ? " vessel" : " vessels") + " in this project" +
+      (flagged ? " · " + flagged + " need attention" : "");
+    var flat = LOGIC().flattenForest(LOGIC().buildLineageForest(records));
+    if (!flat.length) {
+      body.innerHTML =
+        '<p style="color:#94a3b8;padding:40px 24px;text-align:center;line-height:1.6">No vessels yet.<br>' +
+        'Switch to the <strong style="color:#e5e7eb">Cell Culture</strong> tab, drop a flask/dish/cell line ' +
+        "onto the timeline, then double-click it to add its record.</p>";
+      return;
+    }
+    var html = "";
+    var lastGroup = null;
+    flat.forEach(function (item) {
+      var r = item.record;
+      if (item.depth === 0) {
+        var group = (String(r.donor || "").trim() || "Unknown donor") +
+          (r.eye && r.eye !== "unknown" ? " · " + r.eye : "");
+        if (group !== lastGroup) {
+          html += '<div style="margin:14px 6px 4px;color:#94a3b8;font-size:.72rem;letter-spacing:.04em;' +
+            'text-transform:uppercase;font-weight:600">' + esc(group) + "</div>";
+          lastGroup = group;
+        }
+      }
+      var indent = 12 + item.depth * 22;
+      var warnN = LOGIC().cultureWarnings(r, records).length;
+      var dot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
+        statusColor(r.status || "active") + ';margin-right:8px"></span>';
+      var connector = item.depth > 0 ? '<span style="color:#475569">&#9492;&#9472; </span>' : "";
+      var meta = (r.passage !== "" && r.passage != null ? "P" + r.passage + " · " : "") +
+        esc(LOGIC().vesselTypeFromIcon(r.iconId)) + " · " + esc(r.status || "active");
+      var warn = warnN ? ' <span style="color:#fca5a5;font-size:.72rem">&#9888; ' + warnN + "</span>" : "";
+      html +=
+        '<div data-node-id="' + esc(r.nodeId) + '" style="cursor:pointer;padding:6px 10px;padding-left:' +
+        indent + 'px;border-radius:6px;font-size:.82rem;color:#e5e7eb">' +
+        connector + dot + "<strong>" + esc(recordName(r)) + "</strong> " +
+        '<span style="color:#94a3b8">' + meta + "</span>" + warn + "</div>";
+    });
+    body.innerHTML = html;
+    Array.prototype.forEach.call(body.querySelectorAll("div[data-node-id]"), wireRowClick);
+  }
+
   // Show the records view (and hide the canvas + palette) while the recorder
   // workspace tab is active; restore them otherwise.
   var canvasEl = null;
@@ -468,7 +558,7 @@
     // workspace TABS live in the toolbar too — hide only the actions, not the bar.
     var actions = document.querySelector(".workspace__actions");
     if (isRecorder) {
-      renderGrid();
+      renderView();
       if (view) view.style.display = "block";
       if (canvasEl) canvasEl.style.display = "none";
       if (paletteEl) paletteEl.style.display = "none";

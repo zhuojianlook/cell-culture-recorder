@@ -209,6 +209,59 @@
     return false;
   }
 
+  // ─── Lineage tree ─────────────────────────────────────────────────────────
+  // Build a forest of parent→child trees from the records. Roots are vessels
+  // with no parent (or a dangling parent). Children are sorted by passage then
+  // seed date; roots by donor/eye/passage/seed. A shared visited set makes it
+  // cycle-safe. Each tree node is { record, depth, children }.
+  function buildLineageForest(records) {
+    records = records || [];
+    var byId = {};
+    records.forEach(function (r) { byId[str(r.nodeId)] = r; });
+    var childrenMap = {};
+    records.forEach(function (r) {
+      var pid = str(r.parentNodeId);
+      if (pid && byId[pid]) (childrenMap[pid] = childrenMap[pid] || []).push(r);
+    });
+    var seen = {};
+    function build(rec, depth) {
+      var idk = str(rec.nodeId);
+      if (seen[idk]) return { record: rec, depth: depth, children: [] };
+      seen[idk] = true;
+      var kids = (childrenMap[idk] || []).slice().sort(function (a, b) {
+        return ((Number(a.passage) || 0) - (Number(b.passage) || 0)) || str(a.seedDate).localeCompare(str(b.seedDate));
+      });
+      return {
+        record: rec,
+        depth: depth,
+        children: kids.map(function (k) { return build(k, depth + 1); }),
+      };
+    }
+    var roots = records.filter(function (r) {
+      var pid = str(r.parentNodeId);
+      return !pid || !byId[pid];
+    });
+    var forest = roots.sort(compareCultureRecords).map(function (r) { return build(r, 0); });
+    // Any record not reached from a root (e.g. trapped in a cycle) becomes its
+    // own root, so nothing is silently hidden from the tree.
+    records
+      .filter(function (r) { return !seen[str(r.nodeId)]; })
+      .sort(compareCultureRecords)
+      .forEach(function (r) { forest.push(build(r, 0)); });
+    return forest;
+  }
+
+  // Depth-first flattening of the forest into [{ record, depth }] (the render order).
+  function flattenForest(forest) {
+    var out = [];
+    function walk(node) {
+      out.push({ record: node.record, depth: node.depth });
+      (node.children || []).forEach(walk);
+    }
+    (forest || []).forEach(walk);
+    return out;
+  }
+
   // ─── Events / passaging ───────────────────────────────────────────────────
   // An event is { type, at (YYYY-MM-DD), confluence, viability, splitRatio,
   // medium, operator, notes, seq }. Stored as a JSON array on
@@ -260,6 +313,8 @@
     statusFromEvent: statusFromEvent,
     sortEvents: sortEvents,
     summarizeEvent: summarizeEvent,
+    buildLineageForest: buildLineageForest,
+    flattenForest: flattenForest,
     VESSEL_TYPES: VESSEL_TYPES,
     vesselTypeFromIcon: vesselTypeFromIcon,
     isCultureVesselIcon: isCultureVesselIcon,

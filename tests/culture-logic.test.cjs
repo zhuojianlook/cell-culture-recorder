@@ -156,6 +156,42 @@ test("childrenOf returns direct children", () => {
   assert.deepEqual(L.childrenOf(recs, "n-4"), []);
 });
 
+test("buildLineageForest builds parent->child trees", () => {
+  const recs = [
+    { nodeId: "n-1", donor: "6769", eye: "OD", passage: "0", seedDate: "2026-05-01", label: "P0" },
+    { nodeId: "n-2", donor: "6769", eye: "OD", passage: "1", seedDate: "2026-05-10", parentNodeId: "n-1", label: "P1" },
+    { nodeId: "n-3", donor: "6769", eye: "OD", passage: "2", seedDate: "2026-05-20", parentNodeId: "n-2", label: "P2" },
+    { nodeId: "n-4", donor: "6769", eye: "OD", passage: "1", seedDate: "2026-05-12", parentNodeId: "n-1", label: "P1b" },
+  ];
+  const forest = L.buildLineageForest(recs);
+  assert.equal(forest.length, 1); // single root n-1
+  assert.equal(forest[0].record.nodeId, "n-1");
+  // n-1 has two children (n-2, n-4), sorted by passage then seed date
+  assert.deepEqual(forest[0].children.map((c) => c.record.nodeId), ["n-2", "n-4"]);
+  // n-2 -> n-3
+  assert.equal(forest[0].children[0].children[0].record.nodeId, "n-3");
+  // flatten gives depth-first render order with depths
+  const flat = L.flattenForest(forest).map((x) => x.record.nodeId + "@" + x.depth);
+  assert.deepEqual(flat, ["n-1@0", "n-2@1", "n-3@2", "n-4@1"]);
+});
+
+test("buildLineageForest treats dangling parents as roots + is cycle-safe", () => {
+  // dangling parent (n-99 doesn't exist) -> n-2 is a root
+  const dangling = [
+    { nodeId: "n-1", donor: "a", passage: "0" },
+    { nodeId: "n-2", donor: "b", passage: "0", parentNodeId: "n-99" },
+  ];
+  assert.equal(L.buildLineageForest(dangling).length, 2);
+  // a broken cycle must not hang and must still produce output
+  const cyclic = [
+    { nodeId: "a", donor: "x", parentNodeId: "b" },
+    { nodeId: "b", donor: "x", parentNodeId: "a" },
+  ];
+  const f = L.buildLineageForest(cyclic);
+  assert.ok(Array.isArray(f));
+  assert.ok(L.flattenForest(f).length >= 1);
+});
+
 test("parseEvents is tolerant of bad input", () => {
   assert.deepEqual(L.parseEvents('[{"type":"feed"}]'), [{ type: "feed" }]);
   assert.deepEqual(L.parseEvents(""), []);
