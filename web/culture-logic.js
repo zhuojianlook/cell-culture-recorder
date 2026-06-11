@@ -147,6 +147,21 @@
     });
   }
 
+  // Free-text match across a record's searchable fields (donor, label, eye,
+  // passage, medium, status, seed date, vessel type).
+  function recordMatchesQuery(record, query) {
+    var q = str(query).trim().toLowerCase();
+    if (!q) return true;
+    record = record || {};
+    var hay = [
+      record.donor, record.label, record.eye,
+      record.passage !== "" && record.passage != null ? "p" + record.passage : "",
+      record.medium, record.status, record.seedDate,
+      vesselTypeFromIcon(record.iconId),
+    ].join(" ").toLowerCase();
+    return hay.indexOf(q) >= 0;
+  }
+
   // Grid sort: donor, then eye, then passage (numeric), then seed date.
   function compareCultureRecords(a, b) {
     a = a || {}; b = b || {};
@@ -477,6 +492,7 @@
     isCultureVesselIcon: isCultureVesselIcon,
     cultureLabelSummary: cultureLabelSummary,
     shouldOverwriteLabel: shouldOverwriteLabel,
+    recordMatchesQuery: recordMatchesQuery,
     cultureWarnings: cultureWarnings,
     compareCultureRecords: compareCultureRecords,
     maxNodeIdNumber: maxNodeIdNumber,

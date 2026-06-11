@@ -114,6 +114,17 @@ test("cultureWarnings: field tagging + dedup", () => {
   assert.deepEqual(ws[1].fields, ["seedDate"]);
 });
 
+test("recordMatchesQuery searches across fields", () => {
+  const r = { donor: "6769", eye: "OD", passage: "2", medium: "F99", status: "frozen", iconId: "t75_flask", label: "6769 OD P2" };
+  assert.equal(L.recordMatchesQuery(r, ""), true); // empty matches all
+  assert.equal(L.recordMatchesQuery(r, "6769"), true);
+  assert.equal(L.recordMatchesQuery(r, "f99"), true); // medium, case-insensitive
+  assert.equal(L.recordMatchesQuery(r, "frozen"), true); // status
+  assert.equal(L.recordMatchesQuery(r, "p2"), true); // passage token
+  assert.equal(L.recordMatchesQuery(r, "T75 flask"), true); // vessel type
+  assert.equal(L.recordMatchesQuery(r, "9999"), false);
+});
+
 test("compareCultureRecords sorts by donor, eye, passage, seed date", () => {
   const recs = [
     { donor: "6769", eye: "OS", passage: "1" },

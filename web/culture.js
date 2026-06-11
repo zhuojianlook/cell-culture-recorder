@@ -364,6 +364,21 @@
 
   var view = null;
   var viewMode = "table"; // "table" | "tree"
+  var filterQuery = "";
+  var filterStatus = "all";
+  var filterNeedsAttn = false;
+
+  // The records to display after applying search + status + needs-attention
+  // filters. Warnings are still computed against ALL records (peers) for context.
+  function filteredRecords(all) {
+    var q = filterQuery.trim();
+    return all.filter(function (r) {
+      if (q && !LOGIC().recordMatchesQuery(r, q)) return false;
+      if (filterStatus !== "all" && (r.status || "active") !== filterStatus) return false;
+      if (filterNeedsAttn && !LOGIC().cultureWarnings(r, all).length) return false;
+      return true;
+    });
+  }
 
   // The recorder is rendered inline in the workspace area (where the canvas
   // lives) whenever the "Cell Culture Recorder" workspace tab is active.
@@ -390,10 +405,23 @@
           '</div>' +
         '</div>' +
       '</div>' +
+      '<div style="display:flex;gap:10px;align-items:center;padding:10px 16px;flex-wrap:wrap;' +
+        'border-bottom:1px solid rgba(148,163,184,.08)">' +
+        '<input type="search" id="wlpcSearch" class="modal__input" placeholder="Search donor, label, medium, vessel…" style="flex:1;min-width:170px">' +
+        '<select id="wlpcStatusFilter" class="modal__input" style="width:auto">' +
+          '<option value="all">All statuses</option>' +
+          STATUSES.map(function (s) { return '<option value="' + s + '">' + s.charAt(0).toUpperCase() + s.slice(1) + "</option>"; }).join("") +
+        "</select>" +
+        '<label style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:#94a3b8;white-space:nowrap">' +
+          '<input type="checkbox" id="wlpcNeedsAttn"> Needs attention</label>' +
+      "</div>" +
       '<div id="wlpcImportStatus" style="display:none;margin:0 16px;padding:8px 12px;border-radius:8px;' +
         'background:rgba(94,234,212,.12);color:#5eead4;font-size:.82rem"></div>' +
       '<div id="wlpcGridBody" style="padding:8px 16px 22px"></div>';
     workspace.appendChild(view);
+    view.querySelector("#wlpcSearch").addEventListener("input", function (e) { filterQuery = e.target.value; renderView(); });
+    view.querySelector("#wlpcStatusFilter").addEventListener("change", function (e) { filterStatus = e.target.value; renderView(); });
+    view.querySelector("#wlpcNeedsAttn").addEventListener("change", function (e) { filterNeedsAttn = e.target.checked; renderView(); });
     var setMode = function (m) { viewMode = m; updateModeButtons(); renderView(); };
     view.querySelector("#wlpcModeTable").onclick = function () { setMode("table"); };
     view.querySelector("#wlpcModeTree").onclick = function () { setMode("tree"); };
@@ -421,20 +449,33 @@
     else renderGrid();
   }
 
+  // Subtitle shared by both views: "N vessels (M of N when filtered) · K need attention".
+  function updateSubtitle(all, shown) {
+    var flagged = all.filter(function (r) { return LOGIC().cultureWarnings(r, all).length; }).length;
+    var filtered = shown.length !== all.length;
+    view.querySelector("#wlpcGridSub").textContent =
+      (filtered ? shown.length + " of " + all.length + " vessels" : all.length + (all.length === 1 ? " vessel" : " vessels")) +
+      " in this project" + (flagged ? " · " + flagged + " need attention" : "");
+  }
+  function emptyMessage(filtered) {
+    return filtered
+      ? '<p style="color:#94a3b8;padding:40px 24px;text-align:center">No vessels match the current filter.</p>'
+      : '<p style="color:#94a3b8;padding:40px 24px;text-align:center;line-height:1.6">No vessels yet.<br>' +
+        'Switch to the <strong style="color:#e5e7eb">Cell Culture</strong> tab, drop a flask/dish/cell line ' +
+        "onto the timeline, then double-click it to add its record, or use <strong>Import CSV</strong>.</p>";
+  }
+
   function renderGrid() {
     if (!buildView()) return;
     var body = view.querySelector("#wlpcGridBody");
-    var vessels = allCultureVessels().sort(compareNodes);
-    var peers = allRecords(); // gather once; reused by every row's warnings
-    var flagged = vessels.filter(function (n) { return warningsFor(n, peers).length; }).length;
-    view.querySelector("#wlpcGridSub").textContent =
-      vessels.length + (vessels.length === 1 ? " vessel" : " vessels") + " in this project" +
-      (flagged ? " · " + flagged + " need attention" : "");
+    var peers = allRecords(); // all records — warnings computed against the full set
+    var shown = filteredRecords(peers);
+    var shownIds = {};
+    shown.forEach(function (r) { shownIds[r.nodeId] = true; });
+    var vessels = allCultureVessels().filter(function (n) { return shownIds[n.dataset.nodeId]; }).sort(compareNodes);
+    updateSubtitle(peers, shown);
     if (!vessels.length) {
-      body.innerHTML =
-        '<p style="color:#94a3b8;padding:40px 24px;text-align:center;line-height:1.6">No vessels yet.<br>' +
-        'Switch to the <strong style="color:#e5e7eb">Cell Culture</strong> tab, drop a flask/dish/cell line ' +
-        "onto the timeline, then double-click it to add its record.</p>";
+      body.innerHTML = emptyMessage(peers.length > 0);
       return;
     }
     var rows = vessels.map(function (n) {
@@ -577,19 +618,15 @@
   function renderTree() {
     if (!buildView()) return;
     var body = view.querySelector("#wlpcGridBody");
-    var records = allRecords();
-    var flagged = records.filter(function (r) { return LOGIC().cultureWarnings(r, records).length; }).length;
-    view.querySelector("#wlpcGridSub").textContent =
-      records.length + (records.length === 1 ? " vessel" : " vessels") + " in this project" +
-      (flagged ? " · " + flagged + " need attention" : "");
-    var flat = LOGIC().flattenForest(LOGIC().buildLineageForest(records));
+    var all = allRecords();
+    var shown = filteredRecords(all);
+    updateSubtitle(all, shown);
+    var flat = LOGIC().flattenForest(LOGIC().buildLineageForest(shown));
     if (!flat.length) {
-      body.innerHTML =
-        '<p style="color:#94a3b8;padding:40px 24px;text-align:center;line-height:1.6">No vessels yet.<br>' +
-        'Switch to the <strong style="color:#e5e7eb">Cell Culture</strong> tab, drop a flask/dish/cell line ' +
-        "onto the timeline, then double-click it to add its record.</p>";
+      body.innerHTML = emptyMessage(all.length > 0);
       return;
     }
+    var records = all; // warnings computed against the full set
     var html = "";
     var lastGroup = null;
     flat.forEach(function (item) {
