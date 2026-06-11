@@ -61,11 +61,57 @@ test("shouldOverwriteLabel protects user-typed labels", () => {
   assert.equal(L.shouldOverwriteLabel("60mm dish", "", "60mm dish"), true);
 });
 
-test("cultureWarnings flags missing donor + seed date", () => {
-  assert.deepEqual(L.cultureWarnings({ donor: "6769", seedDate: "2026-05-10" }), []);
-  assert.deepEqual(L.cultureWarnings({ donor: "", seedDate: "2026-05-10" }), ["no donor"]);
-  assert.deepEqual(L.cultureWarnings({ donor: "6769", seedDate: "" }), ["no seed date"]);
-  assert.deepEqual(L.cultureWarnings({}), ["no donor", "no seed date"]);
+function msgs(record, peers) {
+  return L.cultureWarnings(record, peers).map((w) => w.message);
+}
+
+test("cultureWarnings: required fields", () => {
+  assert.deepEqual(msgs({ donor: "6769", seedDate: "2026-05-10" }, []), []);
+  assert.equal(msgs({ donor: "", seedDate: "2026-05-10" }, [])[0], "No donor ID — vessel will be grouped under unknown donor.");
+  assert.equal(msgs({ donor: "6769", seedDate: "" }, [])[0], "No seed date entered.");
+  assert.equal(msgs({}, []).length, 2);
+});
+
+test("cultureWarnings: duplicate label", () => {
+  const rec = { nodeId: "n-2", donor: "6769", seedDate: "2026-05-10", label: "6769 OD T75" };
+  const peers = [rec, { nodeId: "n-1", donor: "6769", seedDate: "2026-05-01", label: "6769 OD T75" }];
+  const m = msgs(rec, peers);
+  assert.ok(m.some((x) => /Duplicate vessel label/.test(x)), m.join("|"));
+});
+
+test("cultureWarnings: parent lineage consistency", () => {
+  const parent = { nodeId: "n-1", donor: "6769", eye: "OD", passage: "2", seedDate: "2026-05-10", label: "P2" };
+  // child passage not higher than parent
+  let child = { nodeId: "n-2", donor: "6769", eye: "OD", passage: "2", seedDate: "2026-05-12", parentNodeId: "n-1" };
+  assert.ok(msgs(child, [parent, child]).some((x) => /child passage should usually be higher/.test(x)));
+  // child seed before parent seed
+  child = { nodeId: "n-2", donor: "6769", eye: "OD", passage: "3", seedDate: "2026-05-01", parentNodeId: "n-1" };
+  assert.ok(msgs(child, [parent, child]).some((x) => /before the parent vessel's seed date/.test(x)));
+  // donor mismatch
+  child = { nodeId: "n-2", donor: "9999", eye: "OD", passage: "3", seedDate: "2026-05-20", parentNodeId: "n-1" };
+  assert.ok(msgs(child, [parent, child]).some((x) => /Parent donor .* does not match/.test(x)));
+  // eye mismatch
+  child = { nodeId: "n-2", donor: "6769", eye: "OS", passage: "3", seedDate: "2026-05-20", parentNodeId: "n-1" };
+  assert.ok(msgs(child, [parent, child]).some((x) => /Parent eye .* does not match/.test(x)));
+  // a clean child raises no lineage warning
+  child = { nodeId: "n-2", donor: "6769", eye: "OD", passage: "3", seedDate: "2026-05-20", parentNodeId: "n-1", label: "P3" };
+  assert.deepEqual(msgs(child, [parent, child]), []);
+});
+
+test("cultureWarnings: passage/date monotonicity among donor+eye peers", () => {
+  const p1 = { nodeId: "n-1", donor: "6769", eye: "OD", passage: "1", seedDate: "2026-05-20", label: "P1" };
+  // a P2 vessel dated BEFORE the existing P1 is suspicious
+  const p2 = { nodeId: "n-2", donor: "6769", eye: "OD", passage: "2", seedDate: "2026-05-10", label: "P2" };
+  assert.ok(msgs(p2, [p1, p2]).some((x) => /date is before existing P1 vessel/.test(x)));
+  // different eye -> no cross-warning
+  const otherEye = { nodeId: "n-3", donor: "6769", eye: "OS", passage: "2", seedDate: "2026-05-10", label: "OS P2" };
+  assert.deepEqual(msgs(otherEye, [p1, otherEye]), []);
+});
+
+test("cultureWarnings: field tagging + dedup", () => {
+  const ws = L.cultureWarnings({ donor: "", seedDate: "" }, []);
+  assert.deepEqual(ws[0].fields, ["donor"]);
+  assert.deepEqual(ws[1].fields, ["seedDate"]);
 });
 
 test("compareCultureRecords sorts by donor, eye, passage, seed date", () => {

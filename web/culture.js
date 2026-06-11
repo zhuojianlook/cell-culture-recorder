@@ -25,8 +25,10 @@
   // dataset into the plain {nodeId,donor,...} record those functions expect.
   function LOGIC() { return window.WLPCultureLogic; }
   function recordOf(node) {
+    var ta = node.querySelector(".node-label");
     return {
       nodeId: node.dataset.nodeId || "",
+      label: (ta && ta.value) || "",
       donor: read(node, "Donor", ""),
       eye: read(node, "Eye", ""),
       passage: read(node, "Passage", ""),
@@ -34,6 +36,10 @@
       status: read(node, "Status", "active"),
       parentNodeId: read(node, "ParentNodeId", ""),
     };
+  }
+  // All cell-culture vessel records (peers) for the active project.
+  function allRecords() {
+    return allCultureVessels().map(recordOf);
   }
   function vesselTypeFromIcon(node) {
     return LOGIC().vesselTypeFromIcon(node.dataset.iconId);
@@ -94,8 +100,43 @@
     backdrop.querySelector("#wlpcCancel").onclick = hide;
     backdrop.querySelector("#wlpcSave").onclick = save;
     backdrop.addEventListener("click", function (e) { if (e.target === backdrop) hide(); });
+    // Live needs-attention warnings as the user edits.
+    backdrop.addEventListener("input", renderEditorWarnings);
+    backdrop.addEventListener("change", renderEditorWarnings);
     modal = backdrop;
     return modal;
+  }
+
+  // The in-progress record from the modal's current field values.
+  function draftRecord() {
+    if (!current) return {};
+    var ta = current.querySelector(".node-label");
+    return {
+      nodeId: current.dataset.nodeId || "",
+      label: (ta && ta.value) || "",
+      donor: val("wlpcDonor").value.trim(),
+      eye: val("wlpcEye").value,
+      passage: val("wlpcPassage").value.trim(),
+      seedDate: val("wlpcSeedDate").value,
+      status: val("wlpcStatus").value,
+      parentNodeId: val("wlpcParent").value,
+    };
+  }
+  // Render the (non-blocking, informational) warnings for the in-progress edit.
+  function renderEditorWarnings() {
+    if (!modal || !current) return;
+    var box = val("wlpcErr");
+    if (!box) return;
+    var w = LOGIC().cultureWarnings(draftRecord(), allRecords());
+    if (!w.length) { box.innerHTML = ""; box.style.display = "none"; return; }
+    box.style.display = "";
+    box.style.color = "#fcd34d";
+    box.innerHTML =
+      '<div style="font-weight:600;margin-bottom:4px">&#9888; ' + w.length +
+      (w.length === 1 ? " thing to check" : " things to check") + "</div>" +
+      '<ul style="margin:0;padding-left:18px">' +
+      w.map(function (x) { return "<li>" + esc(x.message) + "</li>"; }).join("") +
+      "</ul>";
   }
 
   function fieldText(id, label) {
@@ -154,9 +195,9 @@
       sel.appendChild(opt);
     });
     sel.value = read(node, "ParentNodeId", "");
-    val("wlpcErr").textContent = "";
     modal.classList.remove("is-hidden");
     modal.style.display = "flex";
+    renderEditorWarnings();
   }
 
   function hide() {
@@ -217,8 +258,12 @@
       });
   }
 
-  function warningsFor(node) {
-    return LOGIC().cultureWarnings(recordOf(node));
+  // Warning messages (strings) for a node. Pass a precomputed peer-record list
+  // to avoid re-gathering for every grid row.
+  function warningsFor(node, peers) {
+    return LOGIC()
+      .cultureWarnings(recordOf(node), peers || allRecords())
+      .map(function (w) { return w.message; });
   }
 
   function compareNodes(a, b) {
@@ -259,8 +304,11 @@
     if (!buildView()) return;
     var body = view.querySelector("#wlpcGridBody");
     var vessels = allCultureVessels().sort(compareNodes);
+    var peers = allRecords(); // gather once; reused by every row's warnings
+    var flagged = vessels.filter(function (n) { return warningsFor(n, peers).length; }).length;
     view.querySelector("#wlpcGridSub").textContent =
-      vessels.length + (vessels.length === 1 ? " vessel" : " vessels") + " in this project";
+      vessels.length + (vessels.length === 1 ? " vessel" : " vessels") + " in this project" +
+      (flagged ? " · " + flagged + " need attention" : "");
     if (!vessels.length) {
       body.innerHTML =
         '<p style="color:#94a3b8;padding:40px 24px;text-align:center;line-height:1.6">No vessels yet.<br>' +
@@ -269,7 +317,7 @@
       return;
     }
     var rows = vessels.map(function (n) {
-      var w = warningsFor(n);
+      var w = warningsFor(n, peers);
       var status = read(n, "Status", "active");
       var warn = w.length
         ? '<span title="' + esc(w.join(", ")) + '" style="color:#fca5a5">&#9888; ' + w.length + "</span>"
