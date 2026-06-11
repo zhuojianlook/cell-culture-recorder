@@ -12,37 +12,8 @@ use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_updater::UpdaterExt;
-use tauri_plugin_sql::{Migration, MigrationKind};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-
-const DB_URL: &str = "sqlite:cell-culture-recorder.db";
-
-// Cell Culture Recorder's SQLite migrations are kept registered for Phase 2
-// (the unified CCR grid). Phase 1's WetLab frontend uses the sidecar/file-DB
-// and does not touch these tables — they're harmless to create at startup.
-fn migrations() -> Vec<Migration> {
-    vec![
-        Migration {
-            version: 1,
-            description: "create_cell_culture_records",
-            sql: include_str!("../migrations/001_initial_schema.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 2,
-            description: "add_donor_vessel_lineage_fields",
-            sql: include_str!("../migrations/002_donor_vessel_lineage.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 3,
-            description: "add_source_conflict_tracking",
-            sql: include_str!("../migrations/003_source_conflict_tracking.sql"),
-            kind: MigrationKind::Up,
-        },
-    ]
-}
 
 #[derive(serde::Serialize, Clone)]
 struct UpdateProgress {
@@ -289,11 +260,6 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(
-            tauri_plugin_sql::Builder::default()
-                .add_migrations(DB_URL, migrations())
-                .build(),
-        )
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

@@ -1,6 +1,6 @@
 [package]
 name = "cell-culture-recorder"
-version = "0.2.17"
+version = "0.2.18"
 description = "WetLab Planner — integrated lab planning + cell culture recorder"
 authors = ["zhuojian"]
 edition = "2021"
@@ -16,7 +16,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
-tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-updater = "2.10.1"
