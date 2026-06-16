@@ -9,6 +9,12 @@
 
   var EYES = ["unknown", "OD", "OS", "OU"];
   var STATUSES = ["active", "frozen", "contaminated", "discarded"];
+  // Vessel types offered by the recorder's "Add vessel" control (matches the
+  // Cell Culture palette icons; labels come from WLPCultureLogic.VESSEL_TYPES).
+  var VESSEL_ICON_ORDER = [
+    "t25_flask", "t75_flask", "t150_flask", "t175_flask", "t225_flask", "t300_flask",
+    "dish_35mm", "dish_60mm", "dish_100mm", "dish_150mm", "cell_line", "primary_tissue",
+  ];
 
   // Culture fields persisted on node.dataset (camelCase -> data-culture-*).
   function read(node, key, fallback) {
@@ -405,6 +411,8 @@
       try { window.wlpMarkCanvasDirty(); } catch (e) { /* ignore */ }
     }
     hide();
+    // Keep the recorder grid/tree in sync immediately after an edit.
+    if (view && view.style.display !== "none") renderView();
   }
 
   // Status → a small colour for badges/grid.
@@ -476,6 +484,12 @@
         '<div><h2 style="margin:0;font-size:1.15rem;color:#e5e7eb">Cell Culture Records</h2>' +
         '<div id="wlpcGridSub" style="font-size:.8125rem;color:#94a3b8;margin-top:2px"></div></div>' +
         '<div style="display:flex;align-items:center;gap:10px">' +
+          '<div style="display:flex;align-items:center;gap:6px">' +
+            '<select id="wlpcAddType" class="modal__input" style="width:auto" title="Vessel type for the new record">' +
+              vesselTypeOptions() +
+            "</select>" +
+            '<button type="button" id="wlpcAdd" class="btn btn--primary" title="Add a new culture vessel">+ Add vessel</button>' +
+          "</div>" +
           '<button type="button" id="wlpcImport" class="btn" title="Import vessels from a CSV file">Import CSV</button>' +
           '<input type="file" id="wlpcImportFile" accept=".csv,text/csv" style="display:none">' +
           '<div style="display:flex;border:1px solid rgba(148,163,184,.25);border-radius:8px;overflow:hidden">' +
@@ -504,6 +518,9 @@
     var setMode = function (m) { viewMode = m; updateModeButtons(); renderView(); };
     view.querySelector("#wlpcModeTable").onclick = function () { setMode("table"); };
     view.querySelector("#wlpcModeTree").onclick = function () { setMode("tree"); };
+    view.querySelector("#wlpcAdd").onclick = function () {
+      addVessel(view.querySelector("#wlpcAddType").value);
+    };
     var fileInput = view.querySelector("#wlpcImportFile");
     view.querySelector("#wlpcImport").onclick = function () { fileInput.value = ""; fileInput.click(); };
     fileInput.onchange = function () {
@@ -657,6 +674,35 @@
     setTimeout(function () { if (box) box.style.display = "none"; }, 6000);
   }
 
+  // <option> list of vessel types for the "Add vessel" picker (T75 default).
+  function vesselTypeOptions() {
+    return VESSEL_ICON_ORDER.map(function (id) {
+      return '<option value="' + id + '"' + (id === "t75_flask" ? " selected" : "") + ">" +
+        esc(LOGIC().vesselTypeFromIcon(id)) + "</option>";
+    }).join("");
+  }
+
+  // Create a new culture vessel straight from the recorder. The vessel node lives
+  // on the Cell Culture canvas (that's what the grid reads), so we switch there to
+  // create it — tagging it data-workspace="cell-culture" — then return to the
+  // recorder and open the new record's editor.
+  function addVessel(iconId) {
+    if (typeof window.wlpCreateCultureVessel !== "function") {
+      showImportStatus("Adding vessels isn’t available in this build.", true);
+      return;
+    }
+    if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("cell-culture");
+    var nodeId = window.wlpCreateCultureVessel({ iconId: iconId || "t75_flask" }, allCultureVessels().length);
+    if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("culture-records");
+    if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+    setTimeout(function () {
+      renderView();
+      var node = nodeId && document.querySelector('.drop[data-node-id="' + nodeId + '"]');
+      if (node) openRecord(node);
+      else showImportStatus("Couldn’t create the vessel — try the Cell Culture tab.", true);
+    }, 60);
+  }
+
   function runCsvImport(text) {
     var parsed = LOGIC().importCsvToDrafts(text);
     if (!parsed.rowCount) { showImportStatus("No data rows found in that CSV.", true); return; }
@@ -741,11 +787,13 @@
   // workspace tab is active; restore them otherwise.
   var canvasEl = null;
   var paletteEl = null;
+  var workspaceEl = null;
   function syncView() {
     var ws = typeof window.wlpActiveWorkspace === "function" ? window.wlpActiveWorkspace() : "";
     var isRecorder = ws === "culture-records";
     if (!canvasEl) canvasEl = document.getElementById("canvas");
     if (!paletteEl) paletteEl = document.querySelector(".palette");
+    if (!workspaceEl) workspaceEl = document.querySelector(".workspace");
     var logEl = document.querySelector(".log-panel");
     // The timeline controls (Today / zoom) are irrelevant in the grid, but the
     // workspace TABS live in the toolbar too — hide only the actions, not the bar.
@@ -757,12 +805,17 @@
       if (paletteEl) paletteEl.style.display = "none";
       if (logEl) logEl.style.display = "none";
       if (actions) actions.style.visibility = "hidden";
+      // .page is a `260px 1fr` grid; hiding the palette drops .workspace into the
+      // 260px column and squishes the recorder. Span it across both tracks so the
+      // grid fills the whole width while the recorder is active.
+      if (workspaceEl) workspaceEl.style.gridColumn = "1 / -1";
     } else {
       if (view) view.style.display = "none";
       if (canvasEl) canvasEl.style.display = "";
       if (paletteEl) paletteEl.style.display = "";
       if (logEl) logEl.style.display = "";
       if (actions) actions.style.visibility = "";
+      if (workspaceEl) workspaceEl.style.gridColumn = "";
     }
   }
 
