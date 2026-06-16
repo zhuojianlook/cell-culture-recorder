@@ -94,14 +94,14 @@
       '<div class="modal" style="margin-top:8vh;max-width:560px;width:560px">' +
         '<div class="modal__header" style="display:flex;align-items:center;justify-content:space-between">' +
           '<h3 style="margin:0">Culture record</h3>' +
-          '<span id="wlpcRecVessel" style="font-size:.8125rem;color:var(--muted,#94a3b8)"></span>' +
+          '<span id="wlpcRecVessel" style="font-size:.8125rem;color:var(--muted,#828a94)"></span>' +
         '</div>' +
         '<div class="modal__body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
           // Record type — the first, framing choice for every record.
           '<div class="field" style="grid-column:1/-1">' +
             '<label for="wlpcSourceType">Record type</label>' +
             provSelect("wlpcSourceType", LOGIC().SOURCE_RECORD_TYPES, LOGIC().sourceRecordLabel) +
-            '<div style="font-size:.72rem;color:#64748b;margin-top:3px">Is this a piece of <strong>donor tissue</strong> (the raw source) or a <strong>culture vessel</strong> (a flask/dish/cell line)? Drives the source-conflict and ground-truth checks.</div>' +
+            '<div style="font-size:.72rem;color:#5b6268;margin-top:3px">Is this a piece of <strong>donor tissue</strong> (the raw source) or a <strong>culture vessel</strong> (a flask/dish/cell line)? Drives the source-conflict and ground-truth checks.</div>' +
           '</div>' +
           fieldText("wlpcDonor", "Donor / culture name") +
           fieldSelect("wlpcEye", "Eye", EYES) +
@@ -120,7 +120,7 @@
           // Events / passaging log
           '<div class="field" style="grid-column:1/-1">' +
             '<label>Events &amp; passaging</label>' +
-            '<div id="wlpcEventsList" style="max-height:130px;overflow:auto;border:1px solid rgba(148,163,184,.18);border-radius:8px;background:rgba(2,6,23,.35)"></div>' +
+            '<div id="wlpcEventsList" style="max-height:130px;overflow:auto;border:1px solid rgba(130, 138, 148,.18);border-radius:8px;background:rgba(27, 31, 37,.35)"></div>' +
             '<div style="display:flex;gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap">' +
               eventTypeSelect() +
               '<input type="date" id="wlpcEvDate" class="modal__input" style="width:auto">' +
@@ -129,7 +129,7 @@
               '<button type="button" id="wlpcEvAdd" class="btn">+ Record</button>' +
             '</div>' +
           '</div>' +
-          '<div id="wlpcErr" class="form-status" style="grid-column:1/-1;color:#fca5a5"></div>' +
+          '<div id="wlpcErr" class="form-status" style="grid-column:1/-1;color:#ff7b7b"></div>' +
         '</div>' +
         '<div class="modal__footer" style="display:flex;gap:8px;justify-content:flex-end;padding:14px 16px">' +
           '<button type="button" id="wlpcCancel" class="btn">Cancel</button>' +
@@ -181,7 +181,7 @@
     var w = LOGIC().cultureWarnings(draftRecord(), allRecords());
     if (!w.length) { box.innerHTML = ""; box.style.display = "none"; return; }
     box.style.display = "";
-    box.style.color = "#fcd34d";
+    box.style.color = "#ecbe7b";
     box.innerHTML =
       '<div style="font-weight:600;margin-bottom:4px">&#9888; ' + w.length +
       (w.length === 1 ? " thing to check" : " things to check") + "</div>" +
@@ -205,7 +205,7 @@
     var events = LOGIC().sortEvents(LOGIC().parseEvents(node.dataset.cultureEvents));
     if (!events.length) {
       list.innerHTML =
-        '<div style="color:#64748b;font-size:.78rem;padding:8px 10px">No events yet — record a passage, feed, freeze, etc.</div>';
+        '<div style="color:#5b6268;font-size:.78rem;padding:8px 10px">No events yet — record a passage, feed, freeze, etc.</div>';
       return;
     }
     list.innerHTML = events
@@ -213,9 +213,9 @@
         var detail = LOGIC().summarizeEvent(ev);
         var notes = ev.notes ? " — " + esc(ev.notes) : "";
         return (
-          '<div style="font-size:.78rem;padding:5px 10px;border-bottom:1px solid rgba(148,163,184,.08)">' +
-          '<span style="color:#5eead4;font-weight:600">' + esc(String(ev.type).replace("_", " ")) + "</span> " +
-          '<span style="color:#94a3b8">' + esc(ev.at || "") + (detail ? " · " + esc(detail) : "") + "</span>" +
+          '<div style="font-size:.78rem;padding:5px 10px;border-bottom:1px solid rgba(130, 138, 148,.08)">' +
+          '<span style="color:#51afef;font-weight:600">' + esc(String(ev.type).replace("_", " ")) + "</span> " +
+          '<span style="color:#828a94">' + esc(ev.at || "") + (detail ? " · " + esc(detail) : "") + "</span>" +
           esc(notes) +
           "</div>"
         );
@@ -295,16 +295,16 @@
   function provenanceSection() {
     var L = LOGIC();
     return (
-      '<details class="field" style="grid-column:1/-1;border:1px solid rgba(148,163,184,.18);' +
+      '<details class="field" style="grid-column:1/-1;border:1px solid rgba(130, 138, 148,.18);' +
         'border-radius:8px;padding:8px 10px">' +
-        '<summary style="cursor:pointer;color:#94a3b8;font-size:.82rem;user-select:none">' +
+        '<summary style="cursor:pointer;color:#828a94;font-size:.82rem;user-select:none">' +
           "Provenance &amp; source tracking</summary>" +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">' +
           '<div class="field"><label for="wlpcRawSource">Raw source identifier</label>' +
             '<input type="text" id="wlpcRawSource" class="modal__input" placeholder="tissue sample ID, notebook ref…"></div>' +
           '<div class="field"><label for="wlpcGroundTruth">Ground-truth date</label>' +
             provSelect("wlpcGroundTruth", L.GROUND_TRUTH_DATE_FIELDS, L.groundTruthLabel) +
-            '<div style="font-size:.68rem;color:#64748b;margin-top:3px">Which date is authoritative for age &amp; lineage sorting.</div></div>' +
+            '<div style="font-size:.68rem;color:#5b6268;margin-top:3px">Which date is authoritative for age &amp; lineage sorting.</div></div>' +
           '<div class="field"><label for="wlpcDissocDate">Dissociation date</label>' +
             '<input type="date" id="wlpcDissocDate" class="modal__input"></div>' +
           '<div class="field"><label for="wlpcPretreatDate">Pretreatment date</label>' +
@@ -427,7 +427,7 @@
 
   // Status → a small colour for badges/grid.
   function statusColor(s) {
-    return { active: "#5eead4", frozen: "#7dd3fc", contaminated: "#fca5a5", discarded: "#94a3b8" }[s] || "#94a3b8";
+    return { active: "#51afef", frozen: "#7dd3fc", contaminated: "#ff7b7b", discarded: "#828a94" }[s] || "#828a94";
   }
 
   // ─── Records grid (the recorder ledger view) ──────────────────────────────
@@ -486,13 +486,13 @@
     view = document.createElement("section");
     view.id = "wlpcRecordsView";
     view.style.cssText =
-      "flex:1;margin:18px;border:1px solid rgba(148,163,184,.18);border-radius:18px;" +
-      "background:#0b1220;overflow:auto;display:none";
+      "flex:1;margin:18px;border:1px solid rgba(130, 138, 148,.18);border-radius:18px;" +
+      "background:#21242b;overflow:auto;display:none";
     view.innerHTML =
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;' +
-      'border-bottom:1px solid rgba(148,163,184,.12);position:sticky;top:0;background:#0b1220;z-index:1">' +
-        '<div><h2 style="margin:0;font-size:1.15rem;color:#e5e7eb">Cell Culture Records</h2>' +
-        '<div id="wlpcGridSub" style="font-size:.8125rem;color:#94a3b8;margin-top:2px"></div></div>' +
+      'border-bottom:1px solid rgba(130, 138, 148,.12);position:sticky;top:0;background:#21242b;z-index:1">' +
+        '<div><h2 style="margin:0;font-size:1.15rem;color:#bbc2cf">Cell Culture Records</h2>' +
+        '<div id="wlpcGridSub" style="font-size:.8125rem;color:#828a94;margin-top:2px"></div></div>' +
         '<div style="display:flex;align-items:center;gap:10px">' +
           '<div style="display:flex;align-items:center;gap:6px">' +
             '<select id="wlpcAddType" class="modal__input" style="width:auto" title="Vessel type for the new record">' +
@@ -502,24 +502,24 @@
           "</div>" +
           '<button type="button" id="wlpcImport" class="btn" title="Import vessels from a CSV file">Import CSV</button>' +
           '<input type="file" id="wlpcImportFile" accept=".csv,text/csv" style="display:none">' +
-          '<div style="display:flex;border:1px solid rgba(148,163,184,.25);border-radius:8px;overflow:hidden">' +
+          '<div style="display:flex;border:1px solid rgba(130, 138, 148,.25);border-radius:8px;overflow:hidden">' +
             '<button type="button" id="wlpcModeTable" class="btn" style="border:0;border-radius:0;padding:6px 14px">Table</button>' +
             '<button type="button" id="wlpcModeTree" class="btn" style="border:0;border-radius:0;padding:6px 14px">Tree</button>' +
           '</div>' +
         '</div>' +
       '</div>' +
       '<div style="display:flex;gap:10px;align-items:center;padding:10px 16px;flex-wrap:wrap;' +
-        'border-bottom:1px solid rgba(148,163,184,.08)">' +
+        'border-bottom:1px solid rgba(130, 138, 148,.08)">' +
         '<input type="search" id="wlpcSearch" class="modal__input" placeholder="Search donor, label, medium, vessel…" style="flex:1;min-width:170px">' +
         '<select id="wlpcStatusFilter" class="modal__input" style="width:auto">' +
           '<option value="all">All statuses</option>' +
           STATUSES.map(function (s) { return '<option value="' + s + '">' + s.charAt(0).toUpperCase() + s.slice(1) + "</option>"; }).join("") +
         "</select>" +
-        '<label style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:#94a3b8;white-space:nowrap">' +
+        '<label style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:#828a94;white-space:nowrap">' +
           '<input type="checkbox" id="wlpcNeedsAttn"> Needs attention</label>' +
       "</div>" +
       '<div id="wlpcImportStatus" style="display:none;margin:0 16px;padding:8px 12px;border-radius:8px;' +
-        'background:rgba(94,234,212,.12);color:#5eead4;font-size:.82rem"></div>' +
+        'background:rgba(81, 175, 239,.12);color:#51afef;font-size:.82rem"></div>' +
       '<div id="wlpcGridBody" style="padding:8px 16px 22px"></div>';
     workspace.appendChild(view);
     view.querySelector("#wlpcSearch").addEventListener("input", function (e) { filterQuery = e.target.value; renderView(); });
@@ -545,7 +545,7 @@
   }
   function updateModeButtons() {
     if (!view) return;
-    var on = "#134e4a", onText = "#5eead4", off = "transparent", offText = "#94a3b8";
+    var on = "#21364f", onText = "#51afef", off = "transparent", offText = "#828a94";
     var t = view.querySelector("#wlpcModeTable"), r = view.querySelector("#wlpcModeTree");
     if (t) { t.style.background = viewMode === "table" ? on : off; t.style.color = viewMode === "table" ? onText : offText; }
     if (r) { r.style.background = viewMode === "tree" ? on : off; r.style.color = viewMode === "tree" ? onText : offText; }
@@ -565,9 +565,9 @@
   }
   function emptyMessage(filtered) {
     return filtered
-      ? '<p style="color:#94a3b8;padding:40px 24px;text-align:center">No vessels match the current filter.</p>'
-      : '<p style="color:#94a3b8;padding:40px 24px;text-align:center;line-height:1.6">No vessels yet.<br>' +
-        'Switch to the <strong style="color:#e5e7eb">Cell Culture</strong> tab, drop a flask/dish/cell line ' +
+      ? '<p style="color:#828a94;padding:40px 24px;text-align:center">No vessels match the current filter.</p>'
+      : '<p style="color:#828a94;padding:40px 24px;text-align:center;line-height:1.6">No vessels yet.<br>' +
+        'Switch to the <strong style="color:#bbc2cf">Cell Culture</strong> tab, drop a flask/dish/cell line ' +
         "onto the timeline, then double-click it to add its record, or use <strong>Import CSV</strong>.</p>";
   }
 
@@ -588,11 +588,11 @@
       var w = warningsFor(n, peers);
       var status = read(n, "Status", "active");
       var warn = w.length
-        ? '<span title="' + esc(w.join(", ")) + '" style="color:#fca5a5">&#9888; ' + w.length + "</span>"
-        : '<span style="color:#475569">&#10003;</span>';
+        ? '<span title="' + esc(w.join(", ")) + '" style="color:#ff7b7b">&#9888; ' + w.length + "</span>"
+        : '<span style="color:#454a52">&#10003;</span>';
       return (
-        '<tr data-node-id="' + esc(n.dataset.nodeId) + '" style="cursor:pointer;border-top:1px solid rgba(148,163,184,.10)">' +
-        td(read(n, "Donor", "") || '<span style="color:#64748b">—</span>', "font-weight:600") +
+        '<tr data-node-id="' + esc(n.dataset.nodeId) + '" style="cursor:pointer;border-top:1px solid rgba(130, 138, 148,.10)">' +
+        td(read(n, "Donor", "") || '<span style="color:#5b6268">—</span>', "font-weight:600") +
         td(read(n, "Eye", "")) +
         td(read(n, "Passage", "") !== "" ? "P" + read(n, "Passage", "") : "") +
         td(vesselTypeFromIcon(n)) +
@@ -606,13 +606,13 @@
       );
     }).join("");
     body.innerHTML =
-      '<table style="width:100%;border-collapse:collapse;font-size:.8125rem;color:#e5e7eb">' +
-      '<thead><tr style="color:#94a3b8;text-align:left">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:.8125rem;color:#bbc2cf">' +
+      '<thead><tr style="color:#828a94;text-align:left">' +
         th("Donor") + th("Eye") + th("P#") + th("Vessel") + th("Status") + th("Medium") +
         th("Seed date") + th("Lineage parent") + th("⚠") +
       "</tr></thead><tbody>" + rows + "</tbody></table>";
     Array.prototype.forEach.call(body.querySelectorAll("tr[data-node-id]"), function (tr) {
-      tr.addEventListener("mouseenter", function () { tr.style.background = "rgba(148,163,184,.06)"; });
+      tr.addEventListener("mouseenter", function () { tr.style.background = "rgba(130, 138, 148,.06)"; });
       tr.addEventListener("mouseleave", function () { tr.style.background = ""; });
       tr.addEventListener("click", function () {
         var id = tr.getAttribute("data-node-id");
@@ -643,7 +643,7 @@
 
   // Wire a clickable row/tree-node -> jump to the Cell Culture timeline + edit.
   function wireRowClick(el) {
-    el.addEventListener("mouseenter", function () { el.style.background = "rgba(148,163,184,.06)"; });
+    el.addEventListener("mouseenter", function () { el.style.background = "rgba(130, 138, 148,.06)"; });
     el.addEventListener("mouseleave", function () { el.style.background = ""; });
     el.addEventListener("click", function () {
       var id = el.getAttribute("data-node-id");
@@ -678,8 +678,8 @@
     var box = view.querySelector("#wlpcImportStatus");
     if (!box) return;
     box.style.display = "";
-    box.style.background = isError ? "rgba(252,165,165,.12)" : "rgba(94,234,212,.12)";
-    box.style.color = isError ? "#fca5a5" : "#5eead4";
+    box.style.background = isError ? "rgba(252,165,165,.12)" : "rgba(81, 175, 239,.12)";
+    box.style.color = isError ? "#ff7b7b" : "#51afef";
     box.textContent = msg;
     setTimeout(function () { if (box) box.style.display = "none"; }, 6000);
   }
@@ -770,7 +770,7 @@
         var group = (String(r.donor || "").trim() || "Unknown donor") +
           (r.eye && r.eye !== "unknown" ? " · " + r.eye : "");
         if (group !== lastGroup) {
-          html += '<div style="margin:14px 6px 4px;color:#94a3b8;font-size:.72rem;letter-spacing:.04em;' +
+          html += '<div style="margin:14px 6px 4px;color:#828a94;font-size:.72rem;letter-spacing:.04em;' +
             'text-transform:uppercase;font-weight:600">' + esc(group) + "</div>";
           lastGroup = group;
         }
@@ -779,15 +779,15 @@
       var warnN = LOGIC().cultureWarnings(r, records).length;
       var dot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
         statusColor(r.status || "active") + ';margin-right:8px"></span>';
-      var connector = item.depth > 0 ? '<span style="color:#475569">&#9492;&#9472; </span>' : "";
+      var connector = item.depth > 0 ? '<span style="color:#454a52">&#9492;&#9472; </span>' : "";
       var meta = (r.passage !== "" && r.passage != null ? "P" + r.passage + " · " : "") +
         esc(LOGIC().vesselTypeFromIcon(r.iconId)) + " · " + esc(r.status || "active");
-      var warn = warnN ? ' <span style="color:#fca5a5;font-size:.72rem">&#9888; ' + warnN + "</span>" : "";
+      var warn = warnN ? ' <span style="color:#ff7b7b;font-size:.72rem">&#9888; ' + warnN + "</span>" : "";
       html +=
         '<div data-node-id="' + esc(r.nodeId) + '" style="cursor:pointer;padding:6px 10px;padding-left:' +
-        indent + 'px;border-radius:6px;font-size:.82rem;color:#e5e7eb">' +
+        indent + 'px;border-radius:6px;font-size:.82rem;color:#bbc2cf">' +
         connector + dot + "<strong>" + esc(recordName(r)) + "</strong> " +
-        '<span style="color:#94a3b8">' + meta + "</span>" + warn + "</div>";
+        '<span style="color:#828a94">' + meta + "</span>" + warn + "</div>";
     });
     body.innerHTML = html;
     Array.prototype.forEach.call(body.querySelectorAll("div[data-node-id]"), wireRowClick);

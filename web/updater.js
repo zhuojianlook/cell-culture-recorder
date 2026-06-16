@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.23", date: "2026-06-16", changes: [
+      "New doom-one (Doom Emacs) color scheme — slate background, soft fg, blue accent",
+    ] },
     { version: "0.2.22", date: "2026-06-16", changes: [
       "Pick a record type up front — Donor Tissue / Culture Vessel / Mixed — in the culture editor",
       "A primary-tissue vessel defaults to Donor Tissue",
@@ -127,30 +130,30 @@
         '</div>' +
         '<div class="modal__body" style="overflow:auto">' +
           '<div style="text-align:center;padding:10px 0 4px">' +
-            '<div style="font-size:1.3rem;font-weight:700;color:#e5e7eb">' + esc(APP_NAME) + '</div>' +
-            '<div id="wlpAboutVer" style="color:#94a3b8;font-size:.85rem;margin-top:2px"></div>' +
-            '<div style="margin-top:8px;font-size:.85rem;color:#cbd5e1">Created by <strong>' + esc(AUTHOR) + '</strong></div>' +
-            '<div style="margin-top:6px;font-size:.78rem;color:#94a3b8;line-height:1.5;max-width:440px;margin-left:auto;margin-right:auto">' + esc(DESCRIPTION) + '</div>' +
+            '<div style="font-size:1.3rem;font-weight:700;color:#bbc2cf">' + esc(APP_NAME) + '</div>' +
+            '<div id="wlpAboutVer" style="color:#828a94;font-size:.85rem;margin-top:2px"></div>' +
+            '<div style="margin-top:8px;font-size:.85rem;color:#a7afbd">Created by <strong>' + esc(AUTHOR) + '</strong></div>' +
+            '<div style="margin-top:6px;font-size:.78rem;color:#828a94;line-height:1.5;max-width:440px;margin-left:auto;margin-right:auto">' + esc(DESCRIPTION) + '</div>' +
           '</div>' +
-          '<hr style="border:0;border-top:1px solid rgba(148,163,184,.18);margin:14px 0">' +
+          '<hr style="border:0;border-top:1px solid rgba(130, 138, 148,.18);margin:14px 0">' +
           // Update section
           '<div style="display:flex;flex-direction:column;align-items:center;gap:8px">' +
             '<button type="button" id="wlpAboutCheck" class="btn">Check for updates</button>' +
             '<div id="wlpAboutUpd" style="width:100%"></div>' +
           '</div>' +
-          '<hr style="border:0;border-top:1px solid rgba(148,163,184,.18);margin:14px 0">' +
+          '<hr style="border:0;border-top:1px solid rgba(130, 138, 148,.18);margin:14px 0">' +
           // Citation
-          '<div style="font-size:.8rem;color:#e5e7eb;font-weight:600;margin-bottom:6px">Citation</div>' +
-          '<div style="position:relative;background:rgba(2,6,23,.45);border:1px solid rgba(148,163,184,.16);' +
-            'border-radius:8px;padding:10px 36px 10px 12px;font:.72rem/1.5 ui-monospace,Menlo,monospace;color:#94a3b8">' +
+          '<div style="font-size:.8rem;color:#bbc2cf;font-weight:600;margin-bottom:6px">Citation</div>' +
+          '<div style="position:relative;background:rgba(27, 31, 37,.45);border:1px solid rgba(130, 138, 148,.16);' +
+            'border-radius:8px;padding:10px 36px 10px 12px;font:.72rem/1.5 ui-monospace,Menlo,monospace;color:#828a94">' +
             '<span id="wlpAboutCite"></span>' +
             '<button type="button" id="wlpAboutCopy" class="btn" title="Copy citation" ' +
               'style="position:absolute;top:6px;right:6px;padding:2px 8px;font-size:.7rem">Copy</button>' +
           '</div>' +
-          '<hr style="border:0;border-top:1px solid rgba(148,163,184,.18);margin:14px 0">' +
+          '<hr style="border:0;border-top:1px solid rgba(130, 138, 148,.18);margin:14px 0">' +
           // Changelog (collapsible)
           '<details>' +
-            '<summary style="cursor:pointer;color:#e5e7eb;font-size:.8rem;font-weight:600;user-select:none">Changelog</summary>' +
+            '<summary style="cursor:pointer;color:#bbc2cf;font-size:.8rem;font-weight:600;user-select:none">Changelog</summary>' +
             '<div id="wlpAboutLog" style="margin-top:10px"></div>' +
           '</details>' +
         '</div>' +
@@ -193,11 +196,11 @@
     var size = small ? ".68rem" : ".75rem";
     return (
       '<div style="margin-bottom:10px">' +
-        '<div style="font-weight:600;font-size:' + (small ? ".72rem" : ".8rem") + ';color:#e5e7eb">v' +
-          esc(e.version) + " <span style=\"color:#64748b;font-weight:400\">— " + esc(e.date) + "</span></div>" +
+        '<div style="font-weight:600;font-size:' + (small ? ".72rem" : ".8rem") + ';color:#bbc2cf">v' +
+          esc(e.version) + " <span style=\"color:#5b6268;font-weight:400\">— " + esc(e.date) + "</span></div>" +
         '<ul style="margin:3px 0 0;padding-left:18px">' +
           e.changes.map(function (c) {
-            return '<li style="font-size:' + size + ';color:#94a3b8;line-height:1.45">' + esc(c) + "</li>";
+            return '<li style="font-size:' + size + ';color:#828a94;line-height:1.45">' + esc(c) + "</li>";
           }).join("") +
         "</ul>" +
       "</div>"
@@ -228,7 +231,7 @@
       var whatsNew = changelogSince(state.currentVersion);
       box.innerHTML =
         note("info",
-          '<div style="font-weight:600;color:#e5e7eb;margin-bottom:6px">Version ' + esc(state.latestVersion) + " is available</div>" +
+          '<div style="font-weight:600;color:#bbc2cf;margin-bottom:6px">Version ' + esc(state.latestVersion) + " is available</div>" +
           (whatsNew.length
             ? '<div style="max-height:150px;overflow:auto;margin-bottom:8px">' + whatsNew.map(function (e) { return entryHtml(e, true); }).join("") + "</div>"
             : "") +
@@ -243,14 +246,14 @@
       var pct = state.total ? Math.min(100, Math.round((state.downloaded / state.total) * 100)) : null;
       box.innerHTML = note("info",
         "Downloading update… " + got + tot + (pct != null ? " (" + pct + "%)" : "") +
-        '<div style="height:6px;border-radius:3px;background:rgba(148,163,184,.18);margin-top:8px;overflow:hidden">' +
-          '<div style="height:100%;width:' + (pct != null ? pct : 30) + '%;background:#2dd4bf;transition:width .2s"></div>' +
+        '<div style="height:6px;border-radius:3px;background:rgba(130, 138, 148,.18);margin-top:8px;overflow:hidden">' +
+          '<div style="height:100%;width:' + (pct != null ? pct : 30) + '%;background:#51afef;transition:width .2s"></div>' +
         "</div>");
       return;
     }
     if (s === "ready") {
       box.innerHTML = note("ok",
-        '<div style="font-weight:600;color:#e5e7eb;margin-bottom:6px">Update installed.</div>' +
+        '<div style="font-weight:600;color:#bbc2cf;margin-bottom:6px">Update installed.</div>' +
         '<button type="button" id="wlpAboutRestart" class="btn btn--primary" style="font-size:.8rem">Restart now</button>');
       q("wlpAboutRestart").onclick = function () { invoke("restart_app").catch(function () {}); };
       return;
@@ -264,9 +267,9 @@
 
   function note(kind, html) {
     var c = kind === "ok"
-      ? "rgba(94,234,212,.12);color:#5eead4;border-color:rgba(94,234,212,.35)"
+      ? "rgba(81, 175, 239,.12);color:#51afef;border-color:rgba(81, 175, 239,.35)"
       : kind === "warn"
-      ? "rgba(252,165,165,.12);color:#fca5a5;border-color:rgba(252,165,165,.35)"
+      ? "rgba(252,165,165,.12);color:#ff7b7b;border-color:rgba(252,165,165,.35)"
       : "rgba(125,211,252,.12);color:#bae6fd;border-color:rgba(125,211,252,.30)";
     return '<div style="width:100%;border:1px solid;border-radius:8px;padding:8px 12px;font-size:.78rem;background:' + c + '">' + html + "</div>";
   }
