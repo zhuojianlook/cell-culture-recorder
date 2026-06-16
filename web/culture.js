@@ -571,6 +571,17 @@
         "onto the timeline, then double-click it to add its record, or use <strong>Import CSV</strong>.</p>";
   }
 
+  // Donor+Eye grouping key/label for the table view — all passages from the same
+  // donor eye (e.g. 6768 OS = left cornea) share one group.
+  function gridGroupKey(n) {
+    return read(n, "Donor", "").trim().toLowerCase() + "|" + (read(n, "Eye", "").trim() || "unknown");
+  }
+  function gridGroupLabel(n) {
+    var donor = read(n, "Donor", "").trim() || "Unknown donor";
+    var eye = read(n, "Eye", "").trim();
+    return donor + (eye && eye !== "unknown" ? " · " + eye : "");
+  }
+
   function renderGrid() {
     if (!buildView()) return;
     var body = view.querySelector("#wlpcGridBody");
@@ -584,7 +595,18 @@
       body.innerHTML = emptyMessage(peers.length > 0);
       return;
     }
-    var rows = vessels.map(function (n) {
+
+    // Group the (donor/eye/passage/seed-sorted) vessels by donor + eye, so every
+    // passage from the same tissue sits under one header.
+    var groups = [], byKey = {};
+    vessels.forEach(function (n) {
+      var key = gridGroupKey(n);
+      var g = byKey[key];
+      if (!g) { g = byKey[key] = { label: gridGroupLabel(n), nodes: [] }; groups.push(g); }
+      g.nodes.push(n);
+    });
+
+    function vesselRow(n) {
       var w = warningsFor(n, peers);
       var status = read(n, "Status", "active");
       var warn = w.length
@@ -592,8 +614,8 @@
         : '<span style="color:#454a52">&#10003;</span>';
       return (
         '<tr data-node-id="' + esc(n.dataset.nodeId) + '" style="cursor:pointer;border-top:1px solid rgba(130, 138, 148,.10)">' +
-        td(read(n, "Donor", "") || '<span style="color:#5b6268">—</span>', "font-weight:600") +
-        td(read(n, "Eye", "")) +
+        // Indented label so passages read as nested under the donor+eye header.
+        '<td style="padding:8px 10px 8px 26px;font-weight:600">' + esc(nodeLabel(n)) + "</td>" +
         td(read(n, "Passage", "") !== "" ? "P" + read(n, "Passage", "") : "") +
         td(vesselTypeFromIcon(n)) +
         '<td style="padding:8px 10px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;' +
@@ -604,13 +626,27 @@
         '<td style="padding:8px 10px;text-align:center">' + warn + "</td>" +
         "</tr>"
       );
+    }
+
+    var bodyRows = groups.map(function (g) {
+      var warnN = g.nodes.filter(function (n) { return warningsFor(n, peers).length; }).length;
+      var meta = g.nodes.length + (g.nodes.length === 1 ? " vessel" : " vessels") +
+        (warnN ? " · " + warnN + " need attention" : "");
+      var header =
+        '<tr style="background:rgba(81, 175, 239,.07)">' +
+          '<td colspan="8" style="padding:10px 12px;border-top:1px solid rgba(130, 138, 148,.20)">' +
+            '<span style="color:#51afef;font-weight:600">' + esc(g.label) + "</span> " +
+            '<span style="color:#828a94;font-size:.72rem">· ' + esc(meta) + "</span>" +
+          "</td></tr>";
+      return header + g.nodes.map(vesselRow).join("");
     }).join("");
+
     body.innerHTML =
       '<table style="width:100%;border-collapse:collapse;font-size:.8125rem;color:#bbc2cf">' +
       '<thead><tr style="color:#828a94;text-align:left">' +
-        th("Donor") + th("Eye") + th("P#") + th("Vessel") + th("Status") + th("Medium") +
+        th("Vessel / label") + th("P#") + th("Type") + th("Status") + th("Medium") +
         th("Seed date") + th("Lineage parent") + th("⚠") +
-      "</tr></thead><tbody>" + rows + "</tbody></table>";
+      "</tr></thead><tbody>" + bodyRows + "</tbody></table>";
     Array.prototype.forEach.call(body.querySelectorAll("tr[data-node-id]"), function (tr) {
       tr.addEventListener("mouseenter", function () { tr.style.background = "rgba(130, 138, 148,.06)"; });
       tr.addEventListener("mouseleave", function () { tr.style.background = ""; });
