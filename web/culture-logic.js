@@ -94,9 +94,9 @@
     return s ? s.slice(0, 10) : "";
   }
   function sourceRecordLabel(type) {
-    if (type === "primary_tissue_dissociation") return "Primary tissue / dissociation";
-    if (type === "mixed_source_note") return "Mixed or ambiguous source note";
-    return "Culture vessel / flask";
+    if (type === "primary_tissue_dissociation") return "Donor Tissue";
+    if (type === "mixed_source_note") return "Mixed / Ambiguous";
+    return "Culture Vessel";
   }
   function groundTruthLabel(field) {
     if (field === "dissociation_date") return "Dissociation date";
@@ -222,9 +222,9 @@
       }
     }
 
-    // A primary-tissue/dissociation record sitting on a flask/dish vessel.
+    // A Donor Tissue record sitting on a flask/dish vessel.
     if (sourceType === "primary_tissue_dissociation" && isFlaskOrDishIcon(record.iconId)) {
-      add(["sourceRecordType"], "Marked as primary tissue / dissociation but placed on a flask/dish vessel. Consider recording the tissue source and the P0 flask as separate vessels if their dates differ.");
+      add(["sourceRecordType"], "Marked as Donor Tissue but placed on a flask/dish vessel. Consider recording the donor tissue and the P0 flask as separate vessels if their dates differ.");
     }
 
     // P0 with both a seed date and a differing dissociation date → choose ground truth.

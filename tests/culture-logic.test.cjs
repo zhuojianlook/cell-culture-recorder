@@ -350,7 +350,7 @@ test("cultureWarnings: media-change/feed event before seed date", () => {
 
 test("cultureWarnings: primary-tissue/dissociation on a flask/dish vessel", () => {
   assert.ok(msgs({ donor: "d", seedDate: "2026-05-10", sourceRecordType: "primary_tissue_dissociation", iconId: "t75_flask" }, [])
-    .some((x) => /primary tissue \/ dissociation but placed on a flask\/dish/.test(x)));
+    .some((x) => /Donor Tissue but placed on a flask\/dish/.test(x)));
   // on the primary_tissue icon itself: no warning
   assert.deepEqual(msgs({ donor: "d", seedDate: "2026-05-10", sourceRecordType: "primary_tissue_dissociation", iconId: "primary_tissue" }, []), []);
 });
@@ -378,7 +378,7 @@ test("cultureWarnings: ground-truth date field must point at a non-null date", (
 test("cultureWarnings: source conflict by raw source identifier (same eye)", () => {
   const tissue = { nodeId: "n-1", donor: "6769", eye: "OD", rawSourceIdentifier: "T-12", sourceRecordType: "primary_tissue_dissociation", passage: "0", seedDate: "2026-05-01", dissociationDate: "2026-05-01", label: "tissue" };
   const flask = { nodeId: "n-2", donor: "6769", eye: "OD", rawSourceIdentifier: "T-12", sourceRecordType: "culture_vessel", passage: "0", seedDate: "2026-05-01", label: "flask" };
-  assert.ok(msgs(flask, [tissue, flask]).some((x) => /Raw source ID already appears as Primary tissue \/ dissociation/.test(x)));
+  assert.ok(msgs(flask, [tissue, flask]).some((x) => /Raw source ID already appears as Donor Tissue/.test(x)));
 
   // dissociation date differs between raw-source matches
   const a1 = { nodeId: "a", donor: "6769", eye: "OD", rawSourceIdentifier: "S1", passage: "1", seedDate: "2026-05-10", dissociationDate: "2026-05-01", label: "A" };

@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.22", date: "2026-06-16", changes: [
+      "Pick a record type up front — Donor Tissue / Culture Vessel / Mixed — in the culture editor",
+      "A primary-tissue vessel defaults to Donor Tissue",
+    ] },
     { version: "0.2.21", date: "2026-06-16", changes: [
       "About dialog on startup with an in-app updater (check / install / restart)",
     ] },

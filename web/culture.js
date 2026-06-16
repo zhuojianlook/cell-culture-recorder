@@ -25,6 +25,11 @@
     if (val == null || val === "") delete node.dataset["culture" + key];
     else node.dataset["culture" + key] = String(val);
   }
+  // The record type a freshly-placed node defaults to: a primary-tissue icon is
+  // Donor Tissue; everything else (flask/dish/cell line) is a Culture Vessel.
+  function defaultRecordType(iconId) {
+    return String(iconId) === "primary_tissue" ? "primary_tissue_dissociation" : "culture_vessel";
+  }
 
   // Pure logic lives in culture-logic.js (window.WLPCultureLogic) so it's
   // unit-tested; culture.js is the DOM glue. recordOf() projects a node's
@@ -92,6 +97,12 @@
           '<span id="wlpcRecVessel" style="font-size:.8125rem;color:var(--muted,#94a3b8)"></span>' +
         '</div>' +
         '<div class="modal__body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+          // Record type — the first, framing choice for every record.
+          '<div class="field" style="grid-column:1/-1">' +
+            '<label for="wlpcSourceType">Record type</label>' +
+            provSelect("wlpcSourceType", LOGIC().SOURCE_RECORD_TYPES, LOGIC().sourceRecordLabel) +
+            '<div style="font-size:.72rem;color:#64748b;margin-top:3px">Is this a piece of <strong>donor tissue</strong> (the raw source) or a <strong>culture vessel</strong> (a flask/dish/cell line)? Drives the source-conflict and ground-truth checks.</div>' +
+          '</div>' +
           fieldText("wlpcDonor", "Donor / culture name") +
           fieldSelect("wlpcEye", "Eye", EYES) +
           fieldNum("wlpcPassage", "Passage #") +
@@ -289,12 +300,11 @@
         '<summary style="cursor:pointer;color:#94a3b8;font-size:.82rem;user-select:none">' +
           "Provenance &amp; source tracking</summary>" +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">' +
-          '<div class="field"><label for="wlpcSourceType">Source record type</label>' +
-            provSelect("wlpcSourceType", L.SOURCE_RECORD_TYPES, L.sourceRecordLabel) + "</div>" +
           '<div class="field"><label for="wlpcRawSource">Raw source identifier</label>' +
             '<input type="text" id="wlpcRawSource" class="modal__input" placeholder="tissue sample ID, notebook ref…"></div>' +
           '<div class="field"><label for="wlpcGroundTruth">Ground-truth date</label>' +
-            provSelect("wlpcGroundTruth", L.GROUND_TRUTH_DATE_FIELDS, L.groundTruthLabel) + "</div>" +
+            provSelect("wlpcGroundTruth", L.GROUND_TRUTH_DATE_FIELDS, L.groundTruthLabel) +
+            '<div style="font-size:.68rem;color:#64748b;margin-top:3px">Which date is authoritative for age &amp; lineage sorting.</div></div>' +
           '<div class="field"><label for="wlpcDissocDate">Dissociation date</label>' +
             '<input type="date" id="wlpcDissocDate" class="modal__input"></div>' +
           '<div class="field"><label for="wlpcPretreatDate">Pretreatment date</label>' +
@@ -326,7 +336,7 @@
     val("wlpcSeedDate").value = read(node, "SeedDate", "");
     val("wlpcNotes").value = read(node, "Notes", "");
     // Provenance / source-tracking
-    val("wlpcSourceType").value = read(node, "SourceRecordType", "culture_vessel");
+    val("wlpcSourceType").value = read(node, "SourceRecordType", defaultRecordType(node.dataset.iconId));
     val("wlpcRawSource").value = read(node, "RawSourceIdentifier", "");
     val("wlpcGroundTruth").value = read(node, "GroundTruthDateField", "seed_date");
     val("wlpcDissocDate").value = read(node, "DissociationDate", "");
