@@ -5393,6 +5393,12 @@ function addConnection(fromNode, fromDir, toNode, toDir, options = {}) {
     protocolTaskEl: null,
     protocolTasksCollapsed: false
   });
+  // A vessel→vessel link on the Cell Culture canvas IS a passage: record it as
+  // the child's lineage parent so the records table / tree / warnings see it too.
+  if (workspaceId === "cell-culture" && !fromGroupId && !toGroupId &&
+      isCultureVesselNode(fromNode) && isCultureVesselNode(toNode)) {
+    toNode.dataset.cultureParentNodeId = fromId;
+  }
   updateAllConnections();
   renderPlanningTaskPanel();
   scheduleCanvasSync();
@@ -5409,6 +5415,14 @@ function removeConnection(id) {
   removed.topEl?.remove();
   removed.protocolIconEl?.remove();
   removed.protocolTaskEl?.remove();
+  // If this was a cell-culture passage link, drop the child's lineage parent too,
+  // so deleting the link removes the passage relationship.
+  if (removed.fromId && removed.toId) {
+    const child = canvas.querySelector('.drop[data-node-id="' + removed.toId + '"]');
+    if (child && child.dataset.cultureParentNodeId === removed.fromId) {
+      delete child.dataset.cultureParentNodeId;
+    }
+  }
   applyPlanningDependencyVisuals();
   renderPlanningTaskPanel();
   scheduleCanvasSync();
@@ -5614,58 +5628,45 @@ function updateAllConnections() {
   });
 
   applyPlanningDependencyVisuals();
-  renderCultureLineageLinks();
 }
 
-// Draw a passage-lineage overlay on the Cell Culture canvas: a dashed link from
-// each vessel to its lineage parent (node.dataset.cultureParentNodeId), with a
-// dot at the child end. Decoupled from the user-drawn `connections` model — it's
-// derived purely from the parent pointers and rebuilt whenever connections
-// update (move / zoom / pan / workspace switch) so it always tracks the nodes.
-function renderCultureLineageLinks() {
-  if (!connectionsLayer) return;
-  const NS = "http://www.w3.org/2000/svg";
-  let g = document.getElementById("cultureLineageLayer");
-  if (!g) {
-    g = document.createElementNS(NS, "g");
-    g.setAttribute("id", "cultureLineageLayer");
-    g.style.pointerEvents = "none";
-    // First child -> painted beneath user connection paths.
-    connectionsLayer.insertBefore(g, connectionsLayer.firstChild);
-  }
-  while (g.firstChild) g.removeChild(g.firstChild);
-  if (activeWorkspaceId !== "cell-culture") return;
-  const vessels = Array.from(canvas.querySelectorAll('.drop[data-workspace="cell-culture"]'));
-  if (!vessels.length) return;
-  const byId = {};
-  vessels.forEach((n) => { byId[n.dataset.nodeId] = n; });
-  vessels.forEach((child) => {
-    const pid = child.dataset.cultureParentNodeId;
-    if (!pid) return;
-    const parent = byId[pid];
-    if (!parent || parent === child) return;
-    const a = getHandlePosition(parent, "center");
-    const b = getHandlePosition(child, "center");
-    const mx = a.x + (b.x - a.x) / 2;
-    const path = document.createElementNS(NS, "path");
-    path.setAttribute("d", `M ${a.x} ${a.y} C ${mx} ${a.y} ${mx} ${b.y} ${b.x} ${b.y}`);
-    path.setAttribute("fill", "none");
-    path.setAttribute("stroke", "#51afef");
-    path.setAttribute("stroke-width", "2");
-    path.setAttribute("stroke-dasharray", "5 4");
-    path.setAttribute("stroke-opacity", "0.55");
-    path.setAttribute("class", "culture-lineage-link");
-    g.appendChild(path);
-    const dot = document.createElementNS(NS, "circle");
-    dot.setAttribute("cx", b.x);
-    dot.setAttribute("cy", b.y);
-    dot.setAttribute("r", "3");
-    dot.setAttribute("fill", "#51afef");
-    dot.setAttribute("fill-opacity", "0.8");
-    g.appendChild(dot);
-  });
+// ── Cell-culture passage lineage ⇄ node-to-node connections ─────────────────
+// A passage (e.g. P0 → P1) IS a connection between two vessels, so lineage and
+// real connections are kept in sync both ways: drawing a vessel→vessel link on
+// the Cell Culture canvas records the child's lineage parent (see addConnection),
+// and setting/clearing a lineage parent in the editor creates/removes the
+// matching connection (see wlpSyncLineageConnection).
+function isCultureVesselNode(node) {
+  const id = String((node && node.dataset && node.dataset.iconId) || "");
+  return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id === "cell_line" || id === "primary_tissue";
 }
-window.wlpRenderCultureLineage = renderCultureLineageLinks;
+function ensureLineageConnection(parentId, childId) {
+  if (!parentId || !childId || parentId === childId) return;
+  const parent = canvas.querySelector('.drop[data-node-id="' + parentId + '"]');
+  const child = canvas.querySelector('.drop[data-node-id="' + childId + '"]');
+  if (!parent || !child) return;
+  if (getNodeWorkspace(parent) !== "cell-culture" || getNodeWorkspace(child) !== "cell-culture") return;
+  if (connections.some((c) => c.fromId === parentId && c.toId === childId)) return;
+  addConnection(parent, "right", child, "left", { workspaceId: "cell-culture" });
+}
+function removeLineageConnection(parentId, childId) {
+  if (!parentId || !childId) return;
+  const c = connections.find((x) => x.fromId === parentId && x.toId === childId);
+  if (c) removeConnection(c.id);
+}
+// Called by the culture editor after a lineage parent is set / changed / cleared.
+window.wlpSyncLineageConnection = function (childId, newParentId, oldParentId) {
+  if (oldParentId && oldParentId !== newParentId) removeLineageConnection(oldParentId, childId);
+  if (newParentId) ensureLineageConnection(newParentId, childId);
+};
+// Backfill connections for every vessel that already has a lineage parent (older
+// projects + CSV import). Idempotent — skips pairs that already have a link.
+window.wlpSyncAllLineageConnections = function () {
+  canvas.querySelectorAll('.drop[data-workspace="cell-culture"]').forEach((child) => {
+    const pid = child.dataset.cultureParentNodeId;
+    if (pid) ensureLineageConnection(pid, child.dataset.nodeId || "");
+  });
+};
 
 function getConnectionById(connectionId) {
   const id = String(connectionId || "").trim();
@@ -15261,6 +15262,11 @@ function deserializeCanvasState(data) {
       });
     }
   } catch { /* */ }
+
+  // 9c. Backfill node-to-node passage connections for any lineage parents that
+  // don't have one yet (older projects / CSV imports), so passages always show as
+  // real connections on the Cell Culture canvas.
+  try { window.wlpSyncAllLineageConnections?.(); } catch { /* */ }
 
   // 10. Update all visual state
   try { updateTimelineLayout(); } catch { /* */ }

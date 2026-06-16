@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.26", date: "2026-06-16", changes: [
+      "Passages are now real node-to-node connections: drawing a vessel→vessel link sets the lineage parent, and setting a parent draws the link — kept in sync, with existing lineage backfilled",
+    ] },
     { version: "0.2.25", date: "2026-06-16", changes: [
       "Passage lineage links now draw on the Cell Culture canvas (vessel → its parent)",
       "Renamed the tab to \"Cell Culture Records\"",

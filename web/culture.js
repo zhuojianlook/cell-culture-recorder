@@ -377,6 +377,7 @@
   function save() {
     if (!current) { hide(); return; }
     var node = current;
+    var prevParent = read(node, "ParentNodeId", ""); // capture before overwrite
     write(node, "Donor", val("wlpcDonor").value.trim());
     write(node, "Eye", val("wlpcEye").value);
     write(node, "Passage", val("wlpcPassage").value.trim());
@@ -420,10 +421,10 @@
     if (typeof window.wlpMarkCanvasDirty === "function") {
       try { window.wlpMarkCanvasDirty(); } catch (e) { /* ignore */ }
     }
-    // Redraw the passage-lineage links on the Cell Culture canvas (the parent
-    // may have just changed).
-    if (typeof window.wlpRenderCultureLineage === "function") {
-      try { window.wlpRenderCultureLineage(); } catch (e) { /* ignore */ }
+    // Sync the passage as a real node-to-node connection on the Cell Culture
+    // canvas (create for the new parent, remove the old link if the parent changed).
+    if (typeof window.wlpSyncLineageConnection === "function") {
+      try { window.wlpSyncLineageConnection(node.dataset.nodeId || "", read(node, "ParentNodeId", ""), prevParent); } catch (e) { /* ignore */ }
     }
     hide();
     // Keep the recorder grid/tree in sync immediately after an edit.
@@ -778,6 +779,10 @@
         if (node) { node.dataset.cultureParentNodeId = pid; linked++; }
       }
     });
+    // Draw the imported lineage as real node-to-node passage connections.
+    if (typeof window.wlpSyncAllLineageConnections === "function") {
+      try { window.wlpSyncAllLineageConnections(); } catch (e) { /* ignore */ }
+    }
     if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
     // Back to the recorder + re-render.
     if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("culture-records");
