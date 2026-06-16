@@ -875,6 +875,17 @@ window.wlpCreateCultureVessel = function (fields, index) {
   set("Medium", fields.medium);
   set("Status", fields.status);
   set("Notes", fields.notes);
+  // Provenance / source-tracking (only written when the import supplied them).
+  set("RawSourceIdentifier", fields.rawSourceIdentifier);
+  set("SourceRecordType", fields.sourceRecordType);
+  set("DissociationDate", fields.dissociationDate);
+  set("PretreatmentDate", fields.pretreatmentDate);
+  set("SplitDate", fields.splitDate);
+  set("GroundTruthDateField", fields.groundTruthDateField);
+  set("ConflictResolution", fields.conflictResolution);
+  if (window.WLPCultureLogic && window.WLPCultureLogic.groundTruthDate) {
+    set("GroundTruthDate", window.WLPCultureLogic.groundTruthDate(fields));
+  }
   // If no explicit label, set the node label to the culture identity.
   var ta = drop.querySelector(".node-label");
   if (ta && !fields.label && window.WLPCultureLogic) {

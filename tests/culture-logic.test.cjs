@@ -229,6 +229,9 @@ test("importCsvToDrafts produces normalized vessel drafts", () => {
   assert.deepEqual(out.drafts[0], {
     donor: "6769", eye: "OD", passage: "0", label: "", iconId: "t75_flask",
     seedDate: "2026-05-01", medium: "", status: "active", parentLabel: "", notes: "",
+    // Provenance columns are absent in this CSV -> stable empty defaults.
+    rawSourceIdentifier: "", sourceRecordType: "", dissociationDate: "",
+    pretreatmentDate: "", splitDate: "", groundTruthDateField: "", conflictResolution: "",
   });
   assert.equal(out.drafts[1].passage, "1");
   assert.equal(out.drafts[1].seedDate, "2026-05-10");
@@ -320,4 +323,117 @@ test("wouldCreateCycle blocks lineage cycles", () => {
     { nodeId: "b", parentNodeId: "a" },
   ];
   assert.equal(L.wouldCreateCycle(broken, "c", "a"), false);
+});
+
+// ─── Provenance / source-tracking validation ────────────────────────────────
+
+test("cultureWarnings: provenance-free records raise no provenance warnings (regression)", () => {
+  // A plain vessel (no provenance fields) must behave exactly as before.
+  assert.deepEqual(msgs({ donor: "6769", seedDate: "2026-05-10" }, []), []);
+  const parent = { nodeId: "n-1", donor: "6769", eye: "OD", passage: "2", seedDate: "2026-05-10", label: "P2" };
+  const child = { nodeId: "n-2", donor: "6769", eye: "OD", passage: "3", seedDate: "2026-05-20", parentNodeId: "n-1", label: "P3" };
+  assert.deepEqual(msgs(child, [parent, child]), []);
+});
+
+test("cultureWarnings: split date before seed date", () => {
+  assert.ok(msgs({ donor: "d", seedDate: "2026-05-10", splitDate: "2026-05-01" }, []).some((x) => /Split date is before the seed date/.test(x)));
+  assert.deepEqual(msgs({ donor: "d", seedDate: "2026-05-10", splitDate: "2026-05-12" }, []), []);
+});
+
+test("cultureWarnings: media-change/feed event before seed date", () => {
+  const before = { donor: "d", seedDate: "2026-05-10", events: [{ type: "media_change", at: "2026-05-01" }] };
+  assert.ok(msgs(before, []).some((x) => /media-change\/feed event \(2026-05-01\) is dated before the seed date/.test(x)));
+  // a feed after seed, and a passage before seed, are both fine
+  assert.deepEqual(msgs({ donor: "d", seedDate: "2026-05-10", events: [{ type: "feed", at: "2026-05-12" }] }, []), []);
+  assert.deepEqual(msgs({ donor: "d", seedDate: "2026-05-10", events: [{ type: "passage", at: "2026-05-01" }] }, []), []);
+});
+
+test("cultureWarnings: primary-tissue/dissociation on a flask/dish vessel", () => {
+  assert.ok(msgs({ donor: "d", seedDate: "2026-05-10", sourceRecordType: "primary_tissue_dissociation", iconId: "t75_flask" }, [])
+    .some((x) => /primary tissue \/ dissociation but placed on a flask\/dish/.test(x)));
+  // on the primary_tissue icon itself: no warning
+  assert.deepEqual(msgs({ donor: "d", seedDate: "2026-05-10", sourceRecordType: "primary_tissue_dissociation", iconId: "primary_tissue" }, []), []);
+});
+
+test("cultureWarnings: P0 seed date differs from dissociation date", () => {
+  assert.ok(msgs({ donor: "d", passage: "0", seedDate: "2026-05-10", dissociationDate: "2026-05-08" }, [])
+    .some((x) => /P0 seed date \(2026-05-10\) differs from the dissociation date \(2026-05-08\)/.test(x)));
+  // same date: fine
+  assert.deepEqual(msgs({ donor: "d", passage: "0", seedDate: "2026-05-10", dissociationDate: "2026-05-10" }, []), []);
+  // not P0: this particular rule does not apply
+  assert.ok(!msgs({ donor: "d", passage: "1", seedDate: "2026-05-10", dissociationDate: "2026-05-08" }, []).some((x) => /P0 seed date/.test(x)));
+});
+
+test("cultureWarnings: ground-truth date field must point at a non-null date", () => {
+  assert.ok(msgs({ donor: "d", seedDate: "2026-05-10", groundTruthDateField: "dissociation_date" }, [])
+    .some((x) => /Dissociation date is selected as ground truth/.test(x)));
+  assert.deepEqual(msgs({ donor: "d", seedDate: "2026-05-10", groundTruthDateField: "dissociation_date", dissociationDate: "2026-05-09" }, []), []);
+  assert.ok(msgs({ donor: "d", seedDate: "2026-05-10", groundTruthDateField: "pretreatment_date" }, [])
+    .some((x) => /Pretreatment date is selected as ground truth/.test(x)));
+  assert.ok(msgs({ donor: "d", seedDate: "2026-05-10", groundTruthDateField: "unresolved" }, [])
+    .some((x) => /Ground truth is unresolved/.test(x)));
+  assert.deepEqual(msgs({ donor: "d", seedDate: "2026-05-10", groundTruthDateField: "unresolved", conflictResolution: "renamed flask" }, []), []);
+});
+
+test("cultureWarnings: source conflict by raw source identifier (same eye)", () => {
+  const tissue = { nodeId: "n-1", donor: "6769", eye: "OD", rawSourceIdentifier: "T-12", sourceRecordType: "primary_tissue_dissociation", passage: "0", seedDate: "2026-05-01", dissociationDate: "2026-05-01", label: "tissue" };
+  const flask = { nodeId: "n-2", donor: "6769", eye: "OD", rawSourceIdentifier: "T-12", sourceRecordType: "culture_vessel", passage: "0", seedDate: "2026-05-01", label: "flask" };
+  assert.ok(msgs(flask, [tissue, flask]).some((x) => /Raw source ID already appears as Primary tissue \/ dissociation/.test(x)));
+
+  // dissociation date differs between raw-source matches
+  const a1 = { nodeId: "a", donor: "6769", eye: "OD", rawSourceIdentifier: "S1", passage: "1", seedDate: "2026-05-10", dissociationDate: "2026-05-01", label: "A" };
+  const a2 = { nodeId: "b", donor: "6769", eye: "OD", rawSourceIdentifier: "S1", passage: "2", seedDate: "2026-05-20", dissociationDate: "2026-05-02", label: "B" };
+  assert.ok(msgs(a2, [a1, a2]).some((x) => /Dissociation date differs from raw-source match/.test(x)));
+
+  // same raw source + passage, differing seed dates
+  const s1 = { nodeId: "a", donor: "6769", eye: "OD", rawSourceIdentifier: "Z", passage: "2", seedDate: "2026-05-10", label: "A" };
+  const s2 = { nodeId: "b", donor: "6769", eye: "OD", rawSourceIdentifier: "Z", passage: "2", seedDate: "2026-05-12", label: "B" };
+  assert.ok(msgs(s2, [s1, s2]).some((x) => /Same raw source and passage .* but seed dates differ/.test(x)));
+
+  // both P0, dissociation vs existing P0 seed differ
+  const z1 = { nodeId: "a", donor: "6769", eye: "OD", rawSourceIdentifier: "Q", passage: "0", seedDate: "2026-05-01", label: "P0a" };
+  const z2 = { nodeId: "b", donor: "6769", eye: "OD", rawSourceIdentifier: "Q", passage: "0", seedDate: "2026-05-05", dissociationDate: "2026-05-03", label: "P0b" };
+  assert.ok(msgs(z2, [z1, z2]).some((x) => /Dissociation date does not match the existing P0 seed date/.test(x)));
+
+  // different eye -> no cross warning
+  const e1 = { nodeId: "a", donor: "6769", eye: "OD", rawSourceIdentifier: "W", sourceRecordType: "primary_tissue_dissociation", passage: "0", seedDate: "2026-05-01", label: "OD" };
+  const e2 = { nodeId: "b", donor: "6769", eye: "OS", rawSourceIdentifier: "W", sourceRecordType: "culture_vessel", passage: "0", seedDate: "2026-05-01", label: "OS" };
+  assert.ok(!msgs(e2, [e1, e2]).some((x) => /Raw source ID already appears/.test(x)));
+});
+
+test("groundTruthDate resolves the authoritative date per field", () => {
+  assert.equal(L.groundTruthDate({ groundTruthDateField: "seed_date", seedDate: "2026-05-10" }), "2026-05-10");
+  assert.equal(L.groundTruthDate({ groundTruthDateField: "dissociation_date", dissociationDate: "2026-05-02" }), "2026-05-02");
+  assert.equal(L.groundTruthDate({ groundTruthDateField: "pretreatment_date", pretreatmentDate: "2026-04-30" }), "2026-04-30");
+  assert.equal(L.groundTruthDate({ groundTruthDateField: "unresolved", seedDate: "2026-05-10" }), null);
+  assert.equal(L.groundTruthDate({ seedDate: "2026-05-10" }), "2026-05-10"); // defaults to seed
+  assert.equal(L.groundTruthDate({ groundTruthDateField: "dissociation_date" }), null); // empty -> null
+});
+
+test("provenance helpers: normalize / sameDate / coercers / icon", () => {
+  assert.equal(L.normalizeSourceId("T-12 / a"), "t12a");
+  assert.equal(L.sameDate("2026-05-10T00:00", "2026-05-10"), true);
+  assert.equal(L.coerceSourceRecordType("Primary tissue"), "primary_tissue_dissociation");
+  assert.equal(L.coerceSourceRecordType("flask"), "culture_vessel");
+  assert.equal(L.coerceSourceRecordType(""), "");
+  assert.equal(L.coerceGroundTruthField("dissociation"), "dissociation_date");
+  assert.equal(L.coerceGroundTruthField("seeding"), "seed_date");
+  assert.equal(L.coerceGroundTruthField(""), "");
+  assert.equal(L.isFlaskOrDishIcon("dish_60mm"), true);
+  assert.equal(L.isFlaskOrDishIcon("primary_tissue"), false);
+});
+
+test("importCsvToDrafts maps provenance columns", () => {
+  const csv = [
+    "donor,eye,passage,flask,seed date,raw source,source type,dissociation date,ground truth",
+    "6769,Right,P0,T75,2026-05-01,T-12,primary tissue,2026-04-29,dissociation",
+  ].join("\n");
+  const d = L.importCsvToDrafts(csv).drafts[0];
+  assert.equal(d.rawSourceIdentifier, "T-12");
+  assert.equal(d.sourceRecordType, "primary_tissue_dissociation");
+  assert.equal(d.dissociationDate, "2026-04-29");
+  assert.equal(d.groundTruthDateField, "dissociation_date");
+  assert.equal(d.splitDate, "");
+  assert.equal(d.pretreatmentDate, "");
+  assert.equal(d.conflictResolution, "");
 });

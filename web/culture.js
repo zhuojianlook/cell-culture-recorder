@@ -36,6 +36,15 @@
       seedDate: read(node, "SeedDate", ""),
       status: read(node, "Status", "active"),
       parentNodeId: read(node, "ParentNodeId", ""),
+      // Provenance / source-tracking (drive the conflict + ground-truth warnings).
+      sourceRecordType: read(node, "SourceRecordType", ""),
+      rawSourceIdentifier: read(node, "RawSourceIdentifier", ""),
+      groundTruthDateField: read(node, "GroundTruthDateField", ""),
+      dissociationDate: read(node, "DissociationDate", ""),
+      pretreatmentDate: read(node, "PretreatmentDate", ""),
+      splitDate: read(node, "SplitDate", ""),
+      conflictResolution: read(node, "ConflictResolution", ""),
+      events: LOGIC().parseEvents(node.dataset.cultureEvents),
     };
   }
   // All cell-culture vessel records (peers) for the active project.
@@ -90,6 +99,7 @@
             '<label for="wlpcNotes">Growth notes</label>' +
             '<textarea id="wlpcNotes" class="modal__input" rows="2" style="resize:vertical"></textarea>' +
           '</div>' +
+          provenanceSection() +
           // Events / passaging log
           '<div class="field" style="grid-column:1/-1">' +
             '<label>Events &amp; passaging</label>' +
@@ -127,6 +137,7 @@
     var ta = current.querySelector(".node-label");
     return {
       nodeId: current.dataset.nodeId || "",
+      iconId: current.dataset.iconId || "",
       label: (ta && ta.value) || "",
       donor: val("wlpcDonor").value.trim(),
       eye: val("wlpcEye").value,
@@ -134,6 +145,15 @@
       seedDate: val("wlpcSeedDate").value,
       status: val("wlpcStatus").value,
       parentNodeId: val("wlpcParent").value,
+      // Provenance / source-tracking (the editor's collapsible section).
+      sourceRecordType: val("wlpcSourceType").value,
+      rawSourceIdentifier: val("wlpcRawSource").value.trim(),
+      groundTruthDateField: val("wlpcGroundTruth").value,
+      dissociationDate: val("wlpcDissocDate").value,
+      pretreatmentDate: val("wlpcPretreatDate").value,
+      splitDate: val("wlpcSplitDate").value,
+      conflictResolution: val("wlpcConflictRes").value.trim(),
+      events: LOGIC().parseEvents(current.dataset.cultureEvents),
     };
   }
   // Render the (non-blocking, informational) warnings for the in-progress edit.
@@ -245,6 +265,43 @@
     return '<div class="field"><label for="' + id + '">Lineage parent</label>' +
       '<select id="' + id + '" class="modal__input"><option value="">— none —</option></select></div>';
   }
+  // A <select> whose option labels come from a label function (value !== label).
+  function provSelect(id, values, labelFn) {
+    var o = (values || []).map(function (v) {
+      return '<option value="' + esc(v) + '">' + esc(labelFn(v)) + "</option>";
+    }).join("");
+    return '<select id="' + id + '" class="modal__input">' + o + "</select>";
+  }
+  // Collapsible provenance / source-tracking fields. Collapsed by default so the
+  // common case (a plain vessel) stays uncluttered; warnings reference these
+  // fields when filled in (see culture-logic.js cultureWarnings).
+  function provenanceSection() {
+    var L = LOGIC();
+    return (
+      '<details class="field" style="grid-column:1/-1;border:1px solid rgba(148,163,184,.18);' +
+        'border-radius:8px;padding:8px 10px">' +
+        '<summary style="cursor:pointer;color:#94a3b8;font-size:.82rem;user-select:none">' +
+          "Provenance &amp; source tracking</summary>" +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">' +
+          '<div class="field"><label for="wlpcSourceType">Source record type</label>' +
+            provSelect("wlpcSourceType", L.SOURCE_RECORD_TYPES, L.sourceRecordLabel) + "</div>" +
+          '<div class="field"><label for="wlpcRawSource">Raw source identifier</label>' +
+            '<input type="text" id="wlpcRawSource" class="modal__input" placeholder="tissue sample ID, notebook ref…"></div>' +
+          '<div class="field"><label for="wlpcGroundTruth">Ground-truth date</label>' +
+            provSelect("wlpcGroundTruth", L.GROUND_TRUTH_DATE_FIELDS, L.groundTruthLabel) + "</div>" +
+          '<div class="field"><label for="wlpcDissocDate">Dissociation date</label>' +
+            '<input type="date" id="wlpcDissocDate" class="modal__input"></div>' +
+          '<div class="field"><label for="wlpcPretreatDate">Pretreatment date</label>' +
+            '<input type="date" id="wlpcPretreatDate" class="modal__input"></div>' +
+          '<div class="field"><label for="wlpcSplitDate">Split date</label>' +
+            '<input type="date" id="wlpcSplitDate" class="modal__input"></div>' +
+          '<div class="field" style="grid-column:1/-1"><label for="wlpcConflictRes">Conflict resolution note</label>' +
+            '<textarea id="wlpcConflictRes" class="modal__input" rows="2" style="resize:vertical" ' +
+            'placeholder="How a date/source ambiguity was resolved (required when ground truth is unresolved)"></textarea></div>' +
+        "</div>" +
+      "</details>"
+    );
+  }
 
   function val(id) { return modal.querySelector("#" + id); }
 
@@ -262,6 +319,14 @@
     val("wlpcIncubator").value = read(node, "Incubator", "");
     val("wlpcSeedDate").value = read(node, "SeedDate", "");
     val("wlpcNotes").value = read(node, "Notes", "");
+    // Provenance / source-tracking
+    val("wlpcSourceType").value = read(node, "SourceRecordType", "culture_vessel");
+    val("wlpcRawSource").value = read(node, "RawSourceIdentifier", "");
+    val("wlpcGroundTruth").value = read(node, "GroundTruthDateField", "seed_date");
+    val("wlpcDissocDate").value = read(node, "DissociationDate", "");
+    val("wlpcPretreatDate").value = read(node, "PretreatmentDate", "");
+    val("wlpcSplitDate").value = read(node, "SplitDate", "");
+    val("wlpcConflictRes").value = read(node, "ConflictResolution", "");
     // Lineage parent options — exclude vessels that would form a cycle
     // (this node's own descendants).
     var sel = val("wlpcParent");
@@ -306,6 +371,20 @@
     write(node, "SeedDate", val("wlpcSeedDate").value);
     write(node, "ParentNodeId", val("wlpcParent").value);
     write(node, "Notes", val("wlpcNotes").value.trim());
+    // Provenance / source-tracking — store enums only when non-default, so a
+    // plain vessel keeps a lean dataset.
+    var st = val("wlpcSourceType").value;
+    write(node, "SourceRecordType", st === "culture_vessel" ? "" : st);
+    write(node, "RawSourceIdentifier", val("wlpcRawSource").value.trim());
+    var gt = val("wlpcGroundTruth").value;
+    write(node, "GroundTruthDateField", gt === "seed_date" ? "" : gt);
+    write(node, "DissociationDate", val("wlpcDissocDate").value);
+    write(node, "PretreatmentDate", val("wlpcPretreatDate").value);
+    write(node, "SplitDate", val("wlpcSplitDate").value);
+    write(node, "ConflictResolution", val("wlpcConflictRes").value.trim());
+    // Computed authoritative date (derived from the chosen ground-truth field) —
+    // stored so future lineage/exports use one consistent date per vessel.
+    write(node, "GroundTruthDate", LOGIC().groundTruthDate(recordOf(node)));
 
     // Reflect the culture identity on the canvas node label (e.g. "6769 OD P2")
     // — but DON'T clobber a name the user typed. Only overwrite when the label

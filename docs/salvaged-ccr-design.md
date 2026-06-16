@@ -5,14 +5,29 @@ removed once the recorder became a per-project canvas-node feature inside WetLab
 Planner (culture fields live on `node.dataset.culture*`, serialized with the
 canvas state; see `web/culture.js` + `web/culture-logic.js`).
 
-Two pieces of the original design are **not yet ported** and are wanted for
-upcoming features. They are captured here so the source could be deleted without
-losing the design. The original implementation lives in git history at the
-commit just before this file was added (`src/main.ts`, `src/types.ts`).
+Pieces of the original design were captured here so the source could be deleted
+without losing the design. The original implementation lives in git history at
+the commit just before this file was added (`src/main.ts`, `src/types.ts`).
+
+**Status (v0.2.19):** §1 (provenance schema) and §2 (provenance-dependent
+validation) are now **ported** into the canvas-node model — see the notes inline
+below. §3 (inline grid editing) is still outstanding.
 
 ---
 
-## 1. Provenance / source-tracking schema (feeds richer validation)
+## 1. Provenance / source-tracking schema (feeds richer validation) — ✅ PORTED
+
+Ported as `node.dataset.culture*` keys (camelCase record fields): `sourceRecordType`,
+`rawSourceIdentifier`, `groundTruthDateField`, `groundTruthDate` (computed + stored
+on save), `conflictResolution`, `pretreatmentDate`, `dissociationDate`, plus
+`splitDate`. Surfaced in a collapsible "Provenance & source tracking" section of
+the culture record editor (`web/culture.js`) and populated by CSV import
+(`importCsvToDrafts` + `window.wlpCreateCultureVessel`). Enums live in
+`web/culture-logic.js` (`SOURCE_RECORD_TYPES`, `GROUND_TRUTH_DATE_FIELDS`).
+
+**Not ported:** `raw_intake_json` (the immutable verbatim snapshot of the source
+row at import / manual entry). Still wanted — capturing it on CSV import + manual
+create is the natural next step for full provenance.
 
 The original record carried provenance fields that disambiguate messy intake
 (tissue source vs. flask record, conflicting dates) and unlock the conflict
@@ -31,31 +46,34 @@ warnings below. To add this to the canvas-node model, store each as a
 | `dissociation_date` | `string \| null` (ISO) | Date tissue was dissociated into cells. For P0 often differs from the flask seed date → triggers the "choose ground truth" conflict. |
 | `started_at` | `string` (ISO) | Flask **seed date** (day cells were seeded). Authoritative age when `ground_truth_date_field === 'seed_date'`. Drives passage/date monotonicity. |
 
-## 2. Validation rules not yet in `web/culture-logic.js`
+## 2. Validation rules — ✅ PORTED into `web/culture-logic.js`
 
-`culture-logic.js` already ports: required fields, duplicate-label, parent
+`culture-logic.js` already had: required fields, duplicate-label, parent
 lineage (passage/date increase), and the CSV import mapping. The **provenance-
-dependent** rules below are NOT yet ported (original: `buildDraftWarnings` in
-`src/main.ts`, roughly lines 1167–1325; ground-truth resolver ~1075–1086; source
-conflict / rename suggestion ~1264–1297 + `suggestSourceConflictRename`):
+dependent** rules below are now ported into `cultureWarnings` (original:
+`buildDraftWarnings` in `src/main.ts`, roughly lines 1167–1325; ground-truth
+resolver ~1075–1086; source conflict / rename suggestion ~1264–1297 +
+`suggestSourceConflictRename`). All are covered by `tests/culture-logic.test.cjs`.
 
-- **Source conflict (by `raw_source_identifier`, same eye):** (a) `source_record_type`
-  should not differ across records with the same raw source — if it does, suggest
-  renaming one as tissue source vs. flask; (b) `dissociation_date` should match;
-  (c) identical passage + seed date but differing dissociation date → flag;
-  (d) identical passage but differing seed dates → flag + suggest rename.
-- **Ground-truth consistency:** `ground_truth_date_field === 'dissociation_date'`
-  but `dissociation_date` null → error; same for `'pretreatment_date'`;
-  `'unresolved'` requires `conflict_resolution` (error if empty).
-- **P0 special case:** `passage === 0` with both `started_at` and `dissociation_date`
-  present and differing → warn "choose one as ground truth, keep the other in
-  provenance"; user then sets `ground_truth_date_field` + `conflict_resolution`.
-- **Source type vs vessel:** `source_record_type === 'primary_tissue_dissociation'`
-  with a non-empty flask `vessel` → warn to consider saving tissue source and P0
-  flask as separate records if dates differ.
-- **Media-change chronology:** legacy `media_change_1_date` / `media_change_2_date`
-  should be after `started_at` and in order.
-- **Split date:** `split_date` should be ≥ `started_at`.
+- **Source conflict (by `rawSourceIdentifier`, falling back to donor, same eye):**
+  (a) `sourceRecordType` differs across records with the same raw source → suggest
+  renaming one as tissue source vs. flask; (b) `dissociationDate` differs → flag;
+  (c) identical passage but differing seed dates → flag + suggest rename;
+  (d) both P0 but `dissociationDate` vs the other's seed date differ → flag.
+- **Ground-truth consistency:** `groundTruthDateField === 'dissociation_date'`
+  but `dissociationDate` empty → error; same for `'pretreatment_date'`;
+  `'unresolved'` requires `conflictResolution` (error if empty).
+- **P0 special case:** `passage === 0` with both `seedDate` and `dissociationDate`
+  present and differing → warn "choose one as ground truth, keep the other as raw
+  provenance".
+- **Source type vs vessel:** `sourceRecordType === 'primary_tissue_dissociation'`
+  on a flask/dish icon → warn to consider saving the tissue source and P0 flask
+  as separate vessels if dates differ.
+- **Media-change chronology:** the new canvas-node model has no legacy
+  `media_change_1_date` / `media_change_2_date` columns — media changes live in the
+  events log (`node.dataset.cultureEvents`). Adapted: any `media_change`/`feed`
+  event dated **before** the seed date is flagged.
+- **Split date:** `splitDate` should be ≥ `seedDate` (warn otherwise).
 
 ## 3. Inline grid-editing UX (the original's signature spreadsheet)
 

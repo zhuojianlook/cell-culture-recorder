@@ -22,6 +22,12 @@
     cell_line: "Cell line", primary_tissue: "Primary tissue"
   };
 
+  // Provenance / source-tracking enums (camelCase record fields stored on the
+  // node dataset as culture<Field>). Ported from the original recorder's
+  // SourceRecordType / GroundTruthDateField in src/types.ts.
+  var SOURCE_RECORD_TYPES = ["culture_vessel", "primary_tissue_dissociation", "mixed_source_note"];
+  var GROUND_TRUTH_DATE_FIELDS = ["seed_date", "dissociation_date", "pretreatment_date", "unresolved"];
+
   function str(v) { return v == null ? "" : String(v); }
 
   function vesselTypeFromIcon(iconId) {
@@ -65,6 +71,62 @@
   }
   function num(v) {
     return v === "" || v == null ? null : Number(v);
+  }
+
+  // ─── Provenance helpers (ported from the original recorder) ─────────────────
+  // A flask or dish icon (a physical culture vessel, as opposed to a cell line or
+  // primary-tissue record). Used by the source-type-vs-vessel rule.
+  function isFlaskOrDishIcon(iconId) {
+    var id = str(iconId);
+    return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0;
+  }
+  // Normalize a raw source / donor identifier for equality (strip case + punctuation).
+  function normalizeSourceId(value) {
+    return str(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  }
+  // Same calendar day (compares the YYYY-MM-DD prefix).
+  function sameDate(a, b) {
+    return str(a).slice(0, 10) === str(b).slice(0, 10);
+  }
+  // The ISO date shown in a warning message ("" when empty).
+  function displayDate(value) {
+    var s = str(value).trim();
+    return s ? s.slice(0, 10) : "";
+  }
+  function sourceRecordLabel(type) {
+    if (type === "primary_tissue_dissociation") return "Primary tissue / dissociation";
+    if (type === "mixed_source_note") return "Mixed or ambiguous source note";
+    return "Culture vessel / flask";
+  }
+  function groundTruthLabel(field) {
+    if (field === "dissociation_date") return "Dissociation date";
+    if (field === "pretreatment_date") return "Pretreatment date";
+    if (field === "unresolved") return "Unresolved";
+    return "Seed date";
+  }
+  // The authoritative date a record sorts/ages by, per its ground_truth_date_field
+  // (null when unresolved or the chosen date is empty).
+  function groundTruthDate(record) {
+    record = record || {};
+    var f = str(record.groundTruthDateField) || "seed_date";
+    if (f === "dissociation_date") return str(record.dissociationDate).trim() || null;
+    if (f === "pretreatment_date") return str(record.pretreatmentDate).trim() || null;
+    if (f === "unresolved") return null;
+    return str(record.seedDate).trim() || null;
+  }
+  // A human suggestion for disambiguating a raw-source conflict.
+  function suggestSourceConflictRename(record) {
+    record = record || {};
+    var donor = str(record.donor).trim() || str(record.rawSourceIdentifier).trim() || "source ID";
+    var e = str(record.eye).trim();
+    var eye = e && e !== "unknown" ? " " + e : "";
+    var p = num(record.passage);
+    if (record.sourceRecordType === "primary_tissue_dissociation") {
+      return donor + eye + " tissue dissociation source; reserve the flask label for " +
+        (str(record.label).trim() || (donor + eye + " P0 flask"));
+    }
+    return donor + eye + " " + (p === 0 ? "P0" : "P" + (p == null ? "?" : p)) +
+      " flask; keep the tissue source as a separate raw-source record";
   }
 
   // Needs-attention warnings for a record, given its peer records (the other
@@ -134,6 +196,87 @@
         }
         if (oPass > passage && oSeed < seedMs) {
           add(["seedDate", "passage"], "Existing P" + oPass + ' vessel "' + recLabel(p) + '" is dated before this lower passage.');
+        }
+      });
+    }
+
+    // ─── Provenance / source-tracking rules ──────────────────────────────────
+    // These only fire once the relevant provenance fields are filled in, so a
+    // plain vessel (no provenance) raises none of them.
+    var sourceType = str(record.sourceRecordType) || "culture_vessel";
+    var gtField = str(record.groundTruthDateField) || "seed_date";
+
+    // Split date should not precede the seed date.
+    if (str(record.splitDate).trim() && !isNaN(seedMs) && dateMs(record.splitDate) < seedMs) {
+      add(["splitDate", "seedDate"], "Split date is before the seed date.");
+    }
+
+    // Media-change / feed events should not predate the seed date.
+    if (!isNaN(seedMs) && Array.isArray(record.events)) {
+      var early = record.events.filter(function (ev) {
+        var t = ev && ev.type;
+        return (t === "media_change" || t === "feed") && ev.at && dateMs(ev.at) < seedMs;
+      });
+      if (early.length) {
+        add(["seedDate"], "A media-change/feed event (" + displayDate(early[0].at) + ") is dated before the seed date.");
+      }
+    }
+
+    // A primary-tissue/dissociation record sitting on a flask/dish vessel.
+    if (sourceType === "primary_tissue_dissociation" && isFlaskOrDishIcon(record.iconId)) {
+      add(["sourceRecordType"], "Marked as primary tissue / dissociation but placed on a flask/dish vessel. Consider recording the tissue source and the P0 flask as separate vessels if their dates differ.");
+    }
+
+    // P0 with both a seed date and a differing dissociation date → choose ground truth.
+    if (passage === 0 && str(record.seedDate).trim() && str(record.dissociationDate).trim() &&
+        !sameDate(record.seedDate, record.dissociationDate)) {
+      add(["seedDate", "dissociationDate"],
+        "P0 seed date (" + displayDate(record.seedDate) + ") differs from the dissociation date (" +
+        displayDate(record.dissociationDate) + "). Choose a ground-truth date and keep the other as raw provenance.");
+    }
+
+    // Ground-truth date field must point at a non-null date (or carry a resolution note).
+    if (gtField === "dissociation_date" && !str(record.dissociationDate).trim()) {
+      add(["groundTruthDateField", "dissociationDate"], "Dissociation date is selected as ground truth, but no dissociation date is entered.");
+    }
+    if (gtField === "pretreatment_date" && !str(record.pretreatmentDate).trim()) {
+      add(["groundTruthDateField", "pretreatmentDate"], "Pretreatment date is selected as ground truth, but no pretreatment date is entered.");
+    }
+    if (gtField === "unresolved" && !str(record.conflictResolution).trim()) {
+      add(["groundTruthDateField", "conflictResolution"], "Ground truth is unresolved. Add a resolution note so the ambiguity is traceable.");
+    }
+
+    // Source conflict by raw source identifier (falls back to the donor ID when no
+    // explicit raw source is recorded), among same-eye peers.
+    var sourceId = normalizeSourceId(str(record.rawSourceIdentifier).trim() || record.donor);
+    if (sourceId) {
+      var suggested = suggestSourceConflictRename(record);
+      others.forEach(function (p) {
+        if (normalizeSourceId(str(p.rawSourceIdentifier).trim() || p.donor) !== sourceId) return;
+        if ((str(p.eye).trim() || "unknown") !== eye) return;
+        var pType = str(p.sourceRecordType) || "culture_vessel";
+        if (pType !== sourceType) {
+          add(["rawSourceIdentifier", "sourceRecordType"],
+            "Raw source ID already appears as " + sourceRecordLabel(pType) + ' on "' + recLabel(p) +
+            '". Suggested rename: ' + suggested + ".");
+        }
+        if (str(record.dissociationDate).trim() && str(p.dissociationDate).trim() &&
+            !sameDate(record.dissociationDate, p.dissociationDate)) {
+          add(["dissociationDate"], 'Dissociation date differs from raw-source match "' + recLabel(p) +
+            '" (' + displayDate(p.dissociationDate) + ").");
+        }
+        var pPass = num(p.passage);
+        if (passage !== null && pPass === passage && str(record.seedDate).trim() && str(p.seedDate).trim() &&
+            !sameDate(record.seedDate, p.seedDate)) {
+          add(["seedDate", "rawSourceIdentifier", "passage"],
+            'Same raw source and passage as "' + recLabel(p) + '", but seed dates differ (' +
+            displayDate(p.seedDate) + " vs " + displayDate(record.seedDate) + ").");
+        }
+        if (passage === 0 && str(record.dissociationDate).trim() && pPass === 0 && str(p.seedDate).trim() &&
+            !sameDate(record.dissociationDate, p.seedDate)) {
+          add(["dissociationDate", "passage"],
+            'Dissociation date does not match the existing P0 seed date for "' + recLabel(p) +
+            '". Suggested rename: ' + suggested + ".");
         }
       });
     }
@@ -297,6 +440,27 @@
     return null;
   }
 
+  // Free text -> a known source_record_type ("" when absent/unrecognised, so the
+  // record keeps its default rather than writing an explicit one).
+  function coerceSourceRecordType(raw) {
+    var v = str(raw).trim().toLowerCase();
+    if (!v) return "";
+    if (v.indexOf("tissue") >= 0 || v.indexOf("dissoc") >= 0 || v.indexOf("primary") >= 0) return "primary_tissue_dissociation";
+    if (v.indexOf("mixed") >= 0 || v.indexOf("ambig") >= 0 || v.indexOf("note") >= 0) return "mixed_source_note";
+    if (v.indexOf("vessel") >= 0 || v.indexOf("flask") >= 0 || v.indexOf("culture") >= 0 || v.indexOf("dish") >= 0) return "culture_vessel";
+    return "";
+  }
+  // Free text -> a known ground_truth_date_field ("" when absent/unrecognised).
+  function coerceGroundTruthField(raw) {
+    var v = str(raw).trim().toLowerCase();
+    if (!v) return "";
+    if (v.indexOf("dissoc") >= 0) return "dissociation_date";
+    if (v.indexOf("pretreat") >= 0 || v.indexOf("pre treat") >= 0 || v.indexOf("pre-treat") >= 0) return "pretreatment_date";
+    if (v.indexOf("unresolved") >= 0 || v.indexOf("conflict") >= 0) return "unresolved";
+    if (v.indexOf("seed") >= 0 || v.indexOf("start") >= 0) return "seed_date";
+    return "";
+  }
+
   // Free vessel text -> a known iconId (default t75_flask).
   function vesselIconFromText(text) {
     var t = str(text).toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -323,6 +487,14 @@
     { key: "status", aliases: ["status", "state"] },
     { key: "parentLabel", aliases: ["parent", "parent label", "parent vessel", "mother", "from", "parent flask"] },
     { key: "notes", aliases: ["notes", "comment", "comments", "growth notes", "note"] },
+    // Provenance / source-tracking columns (all optional).
+    { key: "rawSourceIdentifier", aliases: ["raw source", "raw source id", "raw source identifier", "source id", "source identifier", "tissue id", "tissue sample id", "specimen id", "notebook ref"] },
+    { key: "sourceRecordType", aliases: ["source type", "source record type", "record type"] },
+    { key: "dissociationDate", aliases: ["dissociation date", "dissociation", "dissociated", "date dissociated"] },
+    { key: "pretreatmentDate", aliases: ["pretreatment date", "pretreatment", "pre treatment date", "prep date"] },
+    { key: "splitDate", aliases: ["split date", "split", "subculture date", "split on"] },
+    { key: "groundTruthDateField", aliases: ["ground truth", "ground truth date field", "ground truth field"] },
+    { key: "conflictResolution", aliases: ["conflict resolution", "resolution note", "resolution"] },
   ];
   function autoMapImport(headers) {
     var normalized = (headers || []).map(normalizeHeader);
@@ -369,6 +541,15 @@
         status: coerceStatus(cell(row, "status")),
         parentLabel: cell(row, "parentLabel"),
         notes: cell(row, "notes"),
+        // Provenance / source-tracking ("" when the column is absent, so the
+        // record keeps its defaults rather than carrying explicit ones).
+        rawSourceIdentifier: cell(row, "rawSourceIdentifier"),
+        sourceRecordType: coerceSourceRecordType(cell(row, "sourceRecordType")),
+        dissociationDate: coerceDate(cell(row, "dissociationDate")) || "",
+        pretreatmentDate: coerceDate(cell(row, "pretreatmentDate")) || "",
+        splitDate: coerceDate(cell(row, "splitDate")) || "",
+        groundTruthDateField: coerceGroundTruthField(cell(row, "groundTruthDateField")),
+        conflictResolution: cell(row, "conflictResolution"),
       };
     });
     return { drafts: drafts, headers: headers, mapping: mapping, rowCount: drafts.length };
@@ -484,6 +665,8 @@
     coerceEye: coerceEye,
     coerceStatus: coerceStatus,
     coerceDate: coerceDate,
+    coerceSourceRecordType: coerceSourceRecordType,
+    coerceGroundTruthField: coerceGroundTruthField,
     vesselIconFromText: vesselIconFromText,
     autoMapImport: autoMapImport,
     importCsvToDrafts: importCsvToDrafts,
@@ -494,6 +677,16 @@
     shouldOverwriteLabel: shouldOverwriteLabel,
     recordMatchesQuery: recordMatchesQuery,
     cultureWarnings: cultureWarnings,
+    SOURCE_RECORD_TYPES: SOURCE_RECORD_TYPES,
+    GROUND_TRUTH_DATE_FIELDS: GROUND_TRUTH_DATE_FIELDS,
+    isFlaskOrDishIcon: isFlaskOrDishIcon,
+    normalizeSourceId: normalizeSourceId,
+    sameDate: sameDate,
+    displayDate: displayDate,
+    sourceRecordLabel: sourceRecordLabel,
+    groundTruthLabel: groundTruthLabel,
+    groundTruthDate: groundTruthDate,
+    suggestSourceConflictRename: suggestSourceConflictRename,
     compareCultureRecords: compareCultureRecords,
     maxNodeIdNumber: maxNodeIdNumber,
     nextNodeIdCounter: nextNodeIdCounter,
