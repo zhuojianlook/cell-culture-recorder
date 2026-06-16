@@ -420,6 +420,11 @@
     if (typeof window.wlpMarkCanvasDirty === "function") {
       try { window.wlpMarkCanvasDirty(); } catch (e) { /* ignore */ }
     }
+    // Redraw the passage-lineage links on the Cell Culture canvas (the parent
+    // may have just changed).
+    if (typeof window.wlpRenderCultureLineage === "function") {
+      try { window.wlpRenderCultureLineage(); } catch (e) { /* ignore */ }
+    }
     hide();
     // Keep the recorder grid/tree in sync immediately after an edit.
     if (view && view.style.display !== "none") renderView();

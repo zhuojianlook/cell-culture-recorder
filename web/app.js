@@ -113,7 +113,7 @@ const WORKSPACES = [
     // The recorder is a per-project ledger view of the Cell Culture vessels —
     // no palette/canvas of its own; culture.js renders the grid when active.
     id: "culture-records",
-    label: "Cell Culture Recorder",
+    label: "Cell Culture Records",
     paletteTitle: "Cell Culture Records",
     paletteSubtitle: "Every culture vessel in this project.",
     tabs: [],
@@ -5614,7 +5614,58 @@ function updateAllConnections() {
   });
 
   applyPlanningDependencyVisuals();
+  renderCultureLineageLinks();
 }
+
+// Draw a passage-lineage overlay on the Cell Culture canvas: a dashed link from
+// each vessel to its lineage parent (node.dataset.cultureParentNodeId), with a
+// dot at the child end. Decoupled from the user-drawn `connections` model — it's
+// derived purely from the parent pointers and rebuilt whenever connections
+// update (move / zoom / pan / workspace switch) so it always tracks the nodes.
+function renderCultureLineageLinks() {
+  if (!connectionsLayer) return;
+  const NS = "http://www.w3.org/2000/svg";
+  let g = document.getElementById("cultureLineageLayer");
+  if (!g) {
+    g = document.createElementNS(NS, "g");
+    g.setAttribute("id", "cultureLineageLayer");
+    g.style.pointerEvents = "none";
+    // First child -> painted beneath user connection paths.
+    connectionsLayer.insertBefore(g, connectionsLayer.firstChild);
+  }
+  while (g.firstChild) g.removeChild(g.firstChild);
+  if (activeWorkspaceId !== "cell-culture") return;
+  const vessels = Array.from(canvas.querySelectorAll('.drop[data-workspace="cell-culture"]'));
+  if (!vessels.length) return;
+  const byId = {};
+  vessels.forEach((n) => { byId[n.dataset.nodeId] = n; });
+  vessels.forEach((child) => {
+    const pid = child.dataset.cultureParentNodeId;
+    if (!pid) return;
+    const parent = byId[pid];
+    if (!parent || parent === child) return;
+    const a = getHandlePosition(parent, "center");
+    const b = getHandlePosition(child, "center");
+    const mx = a.x + (b.x - a.x) / 2;
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute("d", `M ${a.x} ${a.y} C ${mx} ${a.y} ${mx} ${b.y} ${b.x} ${b.y}`);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "#51afef");
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-dasharray", "5 4");
+    path.setAttribute("stroke-opacity", "0.55");
+    path.setAttribute("class", "culture-lineage-link");
+    g.appendChild(path);
+    const dot = document.createElementNS(NS, "circle");
+    dot.setAttribute("cx", b.x);
+    dot.setAttribute("cy", b.y);
+    dot.setAttribute("r", "3");
+    dot.setAttribute("fill", "#51afef");
+    dot.setAttribute("fill-opacity", "0.8");
+    g.appendChild(dot);
+  });
+}
+window.wlpRenderCultureLineage = renderCultureLineageLinks;
 
 function getConnectionById(connectionId) {
   const id = String(connectionId || "").trim();

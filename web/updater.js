@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.25", date: "2026-06-16", changes: [
+      "Passage lineage links now draw on the Cell Culture canvas (vessel → its parent)",
+      "Renamed the tab to \"Cell Culture Records\"",
+    ] },
     { version: "0.2.24", date: "2026-06-16", changes: [
       "Records table groups passages under their Donor + Eye (the source tissue)",
     ] },
