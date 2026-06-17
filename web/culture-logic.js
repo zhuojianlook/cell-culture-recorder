@@ -246,13 +246,14 @@
       add(["groundTruthDateField", "conflictResolution"], "Ground truth is unresolved. Add a resolution note so the ambiguity is traceable.");
     }
 
-    // Source conflict by raw source identifier (falls back to the donor ID when no
-    // explicit raw source is recorded), among same-eye peers.
-    var sourceId = normalizeSourceId(str(record.rawSourceIdentifier).trim() || record.donor);
+    // Source conflict — only when an EXPLICIT raw source identifier is recorded.
+    // (The donor ID is not a raw source; falling back to it flagged every normal
+    // donor-tissue → flask lineage as a conflict.) Compared among same-eye peers.
+    var sourceId = normalizeSourceId(str(record.rawSourceIdentifier).trim());
     if (sourceId) {
       var suggested = suggestSourceConflictRename(record);
       others.forEach(function (p) {
-        if (normalizeSourceId(str(p.rawSourceIdentifier).trim() || p.donor) !== sourceId) return;
+        if (normalizeSourceId(str(p.rawSourceIdentifier).trim()) !== sourceId) return;
         if ((str(p.eye).trim() || "unknown") !== eye) return;
         var pType = str(p.sourceRecordType) || "culture_vessel";
         if (pType !== sourceType) {
@@ -481,7 +482,7 @@
     // vessel BEFORE label so a "flask"/"vessel" column claims the type, not the
     // free-text label (whose "flask label" alias would otherwise fuzzy-grab it).
     { key: "vessel", aliases: ["vessel", "flask", "flask type", "container", "format", "vessel type"] },
-    { key: "label", aliases: ["label", "vessel label", "flask label", "sample", "sample id", "name", "id"] },
+    { key: "label", aliases: ["label", "vessel label", "flask label", "sample", "sample id", "name"] },
     { key: "seedDate", aliases: ["seed date", "seed", "seeded", "date seeded", "seeding date", "start date", "started", "p0 date"] },
     { key: "medium", aliases: ["medium", "media"] },
     { key: "status", aliases: ["status", "state"] },

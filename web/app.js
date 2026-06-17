@@ -391,6 +391,7 @@ let backendStateHydratedProjectId = "";
 let backendStateSyncTimer = null;
 let backendStateSyncInFlight = false;
 let backendStatePullInFlight = false;
+let isHydratingCanvas = false;
 let localProjectStateRevision = 0;
 let backendInitialHydrationPending = false;
 let localProjectStateDirtySinceHydration = false;
@@ -833,6 +834,10 @@ async function saveCanvasToBackend() {
 }
 
 function scheduleCanvasSync() {
+  // Suppress canvas saves while a project is hydrating — the lineage backfill
+  // creates connections during load and must not write the project back on a
+  // mere open (the backfill is idempotent and re-derives on the next load).
+  if (isHydratingCanvas) return;
   if (!hasActiveBackendSession() || !activeCanvasId) return;
   if (canvasSyncTimer) clearTimeout(canvasSyncTimer);
   canvasSyncTimer = setTimeout(() => {
@@ -5394,10 +5399,25 @@ function addConnection(fromNode, fromDir, toNode, toDir, options = {}) {
     protocolTasksCollapsed: false
   });
   // A vessel→vessel link on the Cell Culture canvas IS a passage: record it as
-  // the child's lineage parent so the records table / tree / warnings see it too.
+  // the child's lineage parent so the records table / tree / warnings see it too
+  // — unless that would form a lineage cycle (the editor's parent dropdown also
+  // blocks cycles; keep the canvas consistent).
   if (workspaceId === "cell-culture" && !fromGroupId && !toGroupId &&
       isCultureVesselNode(fromNode) && isCultureVesselNode(toNode)) {
-    toNode.dataset.cultureParentNodeId = fromId;
+    const CL = window.WLPCultureLogic;
+    let cycles = false;
+    if (CL && CL.wouldCreateCycle) {
+      const recs = [];
+      canvas.querySelectorAll('.drop[data-workspace="cell-culture"]').forEach((n) => {
+        recs.push({ nodeId: n.dataset.nodeId || "", parentNodeId: n.dataset.cultureParentNodeId || "" });
+      });
+      cycles = CL.wouldCreateCycle(recs, toId, fromId);
+    }
+    if (cycles) {
+      showTaskToast("That link would create a lineage cycle — not recorded as a passage.");
+    } else {
+      toNode.dataset.cultureParentNodeId = fromId;
+    }
   }
   updateAllConnections();
   renderPlanningTaskPanel();
@@ -15030,7 +15050,10 @@ function serializeCanvasState() {
   base.mediaFormulations = mediaFormulations.map((mf) => ({ ...mf }));
   base.mediaTemplates = mediaTemplates.map((tmpl) => ({ ...tmpl }));
   base.protocolTemplates = protocolTemplates.map((pt) => ({ ...pt }));
-  base.users = users.map((u) => ({ ...u }));
+  // NOTE: local users are intentionally NOT serialized into the (shareable)
+  // canvas blob — they hold cleartext passwords and persist separately via
+  // persistUsers()/localStorage. Embedding them leaked credentials to anyone a
+  // canvas was shared with and clobbered the opener's local user list.
   base.nodeIdCounter = nodeIdCounter;
   base.connectionIdCounter = connectionIdCounter;
   delete base.analytics;
@@ -15040,6 +15063,10 @@ function serializeCanvasState() {
 
 function deserializeCanvasState(data) {
   if (!data || typeof data !== "object") return;
+  // Mark hydration so the lineage backfill's connection creates don't schedule a
+  // canvas save on a mere open. Reset in a microtask after all synchronous work.
+  isHydratingCanvas = true;
+  Promise.resolve().then(() => { isHydratingCanvas = false; });
 
   // 1. Clear existing canvas nodes
   const existingDrops = canvas.querySelectorAll(".drop");
@@ -15115,10 +15142,9 @@ function deserializeCanvasState(data) {
     protocolTemplates.length = 0;
     data.protocolTemplates.forEach((pt) => protocolTemplates.push({ ...pt }));
   }
-  if (Array.isArray(data.users)) {
-    users.length = 0;
-    data.users.forEach((u) => users.push({ ...u }));
-  }
+  // Local users are NOT taken from the canvas blob anymore (see serializeCanvasState):
+  // they're owned by persistUsers()/localStorage, so opening a shared canvas no
+  // longer overwrites the opener's local user list or imports foreign credentials.
 
   // 9. Rebuild DOM nodes per workspace
   const workspaces = data.workspaces || {};
@@ -15265,8 +15291,9 @@ function deserializeCanvasState(data) {
 
   // 9c. Backfill node-to-node passage connections for any lineage parents that
   // don't have one yet (older projects / CSV imports), so passages always show as
-  // real connections on the Cell Culture canvas.
+  // real connections on the Cell Culture canvas; then paint the status/⚠ badges.
   try { window.wlpSyncAllLineageConnections?.(); } catch { /* */ }
+  try { window.wlpRenderCultureBadges?.(); } catch { /* */ }
 
   // 10. Update all visual state
   try { updateTimelineLayout(); } catch { /* */ }

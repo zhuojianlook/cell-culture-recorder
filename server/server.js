@@ -1549,6 +1549,14 @@ app.post("/api/auth/google", async (req, res) => {
 });
 
 app.post("/api/auth/google-placeholder", async (req, res) => {
+  // This endpoint mints a session for any email with NO verification — it exists
+  // only for the offline desktop build (REQUIRE_AUTH=false, local sidecar). On any
+  // auth-enabled deployment it would be a full account-takeover-by-email, so reject
+  // it there; real clients use /api/auth/google (verified) or /api/auth/local.
+  if (REQUIRE_AUTH) {
+    res.status(404).json({ error: "Not found." });
+    return;
+  }
   const email = normalizeEmail(req.body?.email);
   const name = String(req.body?.name || "").trim();
   const googleSub = String(req.body?.googleSub || "").trim();
@@ -3142,7 +3150,10 @@ if (IS_PRODUCTION && !CELLCULTURE_GOOGLE_CLIENT_ID) {
 
 ensureStorage()
   .then(() => {
-    app.listen(PORT, () => {
+    // Bind to loopback only — the Rust proxy talks to 127.0.0.1, and the desktop
+    // sidecar runs with REQUIRE_AUTH off, so a 0.0.0.0 bind would expose an
+    // unauthenticated DB to the whole LAN.
+    app.listen(PORT, "127.0.0.1", () => {
       // eslint-disable-next-line no-console
       console.log(`[server] Running at http://localhost:${PORT}`);
       // eslint-disable-next-line no-console

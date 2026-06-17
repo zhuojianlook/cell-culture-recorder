@@ -218,13 +218,7 @@
     </span>
   </div>
 
-  <script>
-    // Offline desktop build: no Google sign-in, no web login. The Express
-    // server runs as a bundled sidecar in file-DB mode with REQUIRE_AUTH=false,
-    // so the app boots straight into the workspace.
-    window.CELLCULTURE_GOOGLE_CLIENT_ID = "";
-    window.__REQUIRE_AUTH = false;
-  </script>
+  <script src="boot-config.js"></script>
   <script src="vendor/clocklet.min.js"></script>
   <script src="culture-logic.js"></script>
   <script src="app.js"></script>

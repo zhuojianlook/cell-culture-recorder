@@ -423,6 +423,24 @@ test("provenance helpers: normalize / sameDate / coercers / icon", () => {
   assert.equal(L.isFlaskOrDishIcon("primary_tissue"), false);
 });
 
+test("cultureWarnings: tissue→flask lineage without an explicit raw source raises no source-conflict (C1)", () => {
+  const tissue = { nodeId: "n-1", donor: "6769", eye: "OD", passage: "0", seedDate: "2026-05-01", sourceRecordType: "primary_tissue_dissociation", iconId: "primary_tissue" };
+  const flask = { nodeId: "n-2", donor: "6769", eye: "OD", passage: "1", seedDate: "2026-05-10", sourceRecordType: "culture_vessel", iconId: "t75_flask", parentNodeId: "n-1" };
+  // No raw source id -> the donor is NOT treated as one -> no spurious conflict.
+  assert.ok(!msgs(flask, [tissue, flask]).some((x) => /Raw source ID already appears/.test(x)));
+  assert.ok(!msgs(tissue, [tissue, flask]).some((x) => /Raw source ID already appears/.test(x)));
+  // With an explicit shared raw source, the record-type mismatch still flags.
+  const t2 = { ...tissue, rawSourceIdentifier: "T-12" };
+  const f2 = { ...flask, rawSourceIdentifier: "T-12" };
+  assert.ok(msgs(f2, [t2, f2]).some((x) => /Raw source ID already appears as Donor Tissue/.test(x)));
+});
+
+test("importCsvToDrafts maps a 'Raw Source ID' column to rawSourceIdentifier, not label (C5)", () => {
+  const out = L.importCsvToDrafts("Donor ID,Raw Source ID,Seed Date\n6769,TISSUE-T12,2026-05-01");
+  assert.equal(out.drafts[0].rawSourceIdentifier, "TISSUE-T12");
+  assert.equal(out.drafts[0].label, "");
+});
+
 test("importCsvToDrafts maps provenance columns", () => {
   const csv = [
     "donor,eye,passage,flask,seed date,raw source,source type,dissociation date,ground truth",

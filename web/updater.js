@@ -33,6 +33,13 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.27", date: "2026-06-17", changes: [
+      "Map: each vessel now shows a status dot + warning badge on the Cell Culture canvas",
+      "Editor: 'View in Records' jumps from a vessel to its row in the records table",
+      "Fix: no more false 'raw source conflict' warning on a normal donor-tissue → flask lineage",
+      "Drawing a vessel link that would form a lineage cycle is now blocked",
+      "Security hardening: escaped records-grid cells, loopback-only local server, stricter content policy",
+    ] },
     { version: "0.2.26", date: "2026-06-16", changes: [
       "Passages are now real node-to-node connections: drawing a vessel→vessel link sets the lineage parent, and setting a parent draws the link — kept in sync, with existing lineage backfilled",
     ] },

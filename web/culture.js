@@ -131,7 +131,9 @@
           '</div>' +
           '<div id="wlpcErr" class="form-status" style="grid-column:1/-1;color:#ff7b7b"></div>' +
         '</div>' +
-        '<div class="modal__footer" style="display:flex;gap:8px;justify-content:flex-end;padding:14px 16px">' +
+        '<div class="modal__footer" style="display:flex;gap:8px;align-items:center;padding:14px 16px">' +
+          '<button type="button" id="wlpcViewRecords" class="btn" title="Show this vessel in the Records table">View in Records</button>' +
+          '<span style="flex:1"></span>' +
           '<button type="button" id="wlpcCancel" class="btn">Cancel</button>' +
           '<button type="button" id="wlpcSave" class="btn btn--primary">Save record</button>' +
         '</div>' +
@@ -139,6 +141,9 @@
     document.body.appendChild(backdrop);
     backdrop.querySelector("#wlpcCancel").onclick = hide;
     backdrop.querySelector("#wlpcSave").onclick = save;
+    backdrop.querySelector("#wlpcViewRecords").onclick = function () {
+      if (current) viewInRecords(current.dataset.nodeId || "");
+    };
     backdrop.querySelector("#wlpcEvAdd").onclick = recordEventFromForm;
     backdrop.addEventListener("click", function (e) { if (e.target === backdrop) hide(); });
     // Live needs-attention warnings as the user edits.
@@ -426,6 +431,7 @@
     if (typeof window.wlpSyncLineageConnection === "function") {
       try { window.wlpSyncLineageConnection(node.dataset.nodeId || "", read(node, "ParentNodeId", ""), prevParent); } catch (e) { /* ignore */ }
     }
+    try { renderBadges(); } catch (e) { /* ignore */ }
     hide();
     // Keep the recorder grid/tree in sync immediately after an edit.
     if (view && view.style.display !== "none") renderView();
@@ -434,6 +440,58 @@
   // Status → a small colour for badges/grid.
   function statusColor(s) {
     return { active: "#51afef", frozen: "#7dd3fc", contaminated: "#ff7b7b", discarded: "#828a94" }[s] || "#828a94";
+  }
+
+  // ─── Map integration: per-node status + warning badges ────────────────────
+  // Overlay a small status dot (+ ⚠ count) on each culture vessel on the Cell
+  // Culture canvas, so the map surfaces what the Records views show. The badge is
+  // a child of the node, so it tracks position for free; we only re-render on a
+  // data change (edit/add/import/load) or while the cell-culture tab is active.
+  function renderBadges() {
+    var nodes = allCultureVessels();
+    if (!nodes.length) return;
+    var records = nodes.map(recordOf);
+    nodes.forEach(function (n, i) {
+      var warns = LOGIC().cultureWarnings(records[i], records).length;
+      var status = read(n, "Status", "active");
+      var badge = n.querySelector(".wlpc-badge");
+      if (!badge) {
+        badge = document.createElement("div");
+        badge.className = "wlpc-badge";
+        badge.style.cssText =
+          "position:absolute;top:3px;right:3px;display:flex;gap:3px;align-items:center;pointer-events:none;z-index:4";
+        n.appendChild(badge);
+      }
+      var dot = '<span title="' + esc(status) + '" style="width:9px;height:9px;border-radius:50%;background:' +
+        statusColor(status) + ';border:1.5px solid #21242b;box-sizing:content-box"></span>';
+      var warn = warns
+        ? '<span title="' + warns + (warns === 1 ? " thing" : " things") + ' to check" ' +
+          'style="background:#ff6c6b;color:#21242b;font:600 9px/1 system-ui;border-radius:8px;padding:2px 4px;border:1.5px solid #21242b">&#9888; ' + warns + "</span>"
+        : "";
+      badge.innerHTML = dot + warn;
+    });
+  }
+  window.wlpRenderCultureBadges = renderBadges;
+
+  // Jump from a vessel's editor to its row in the Records table + flash it.
+  function viewInRecords(nodeId) {
+    hide();
+    if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("culture-records");
+    viewMode = "table";
+    setTimeout(function () {
+      syncView();
+      updateModeButtons();
+      highlightRow(nodeId);
+    }, 90);
+  }
+  function highlightRow(nodeId) {
+    if (!view || !nodeId) return;
+    var tr = view.querySelector('tr[data-node-id="' + nodeId + '"]');
+    if (!tr) return;
+    try { tr.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) { tr.scrollIntoView(); }
+    tr.style.transition = "background .3s";
+    tr.style.background = "rgba(81, 175, 239,.25)";
+    setTimeout(function () { if (tr) tr.style.background = ""; }, 1500);
   }
 
   // ─── Records grid (the recorder ledger view) ──────────────────────────────
@@ -622,12 +680,12 @@
         '<tr data-node-id="' + esc(n.dataset.nodeId) + '" style="cursor:pointer;border-top:1px solid rgba(130, 138, 148,.10)">' +
         // Indented label so passages read as nested under the donor+eye header.
         '<td style="padding:8px 10px 8px 26px;font-weight:600">' + esc(nodeLabel(n)) + "</td>" +
-        td(read(n, "Passage", "") !== "" ? "P" + read(n, "Passage", "") : "") +
-        td(vesselTypeFromIcon(n)) +
+        td(read(n, "Passage", "") !== "" ? "P" + esc(read(n, "Passage", "")) : "") +
+        td(esc(vesselTypeFromIcon(n))) +
         '<td style="padding:8px 10px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;' +
           'background:' + statusColor(status) + ';margin-right:6px"></span>' + esc(status) + "</td>" +
-        td(read(n, "Medium", "")) +
-        td(read(n, "SeedDate", "")) +
+        td(esc(read(n, "Medium", ""))) +
+        td(esc(read(n, "SeedDate", ""))) +
         td(parentLabelOf(n)) +
         '<td style="padding:8px 10px;text-align:center">' + warn + "</td>" +
         "</tr>"
@@ -749,6 +807,7 @@
     if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
     setTimeout(function () {
       renderView();
+      try { renderBadges(); } catch (e) { /* ignore */ }
       var node = nodeId && document.querySelector('.drop[data-node-id="' + nodeId + '"]');
       if (node) openRecord(node);
       else showImportStatus("Couldn’t create the vessel — try the Cell Culture tab.", true);
@@ -776,13 +835,21 @@
       var pid = byLabel[pl];
       if (pid && pid !== c.nodeId) {
         var node = document.querySelector('.drop[data-node-id="' + c.nodeId + '"]');
-        if (node) { node.dataset.cultureParentNodeId = pid; linked++; }
+        // Don't link if it would create a lineage cycle (mutually-referencing
+        // parent labels in the CSV).
+        var recs = allCultureVessels().map(function (n) {
+          return { nodeId: n.dataset.nodeId || "", parentNodeId: n.dataset.cultureParentNodeId || "" };
+        });
+        if (node && !LOGIC().wouldCreateCycle(recs, c.nodeId, pid)) {
+          node.dataset.cultureParentNodeId = pid; linked++;
+        }
       }
     });
     // Draw the imported lineage as real node-to-node passage connections.
     if (typeof window.wlpSyncAllLineageConnections === "function") {
       try { window.wlpSyncAllLineageConnections(); } catch (e) { /* ignore */ }
     }
+    try { renderBadges(); } catch (e) { /* ignore */ }
     if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
     // Back to the recorder + re-render.
     if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("culture-records");
@@ -872,6 +939,9 @@
       if (logEl) logEl.style.display = "";
       if (actions) actions.style.visibility = "";
       if (workspaceEl) workspaceEl.style.gridColumn = "";
+      // Keep the map's status/warning badges fresh while the Cell Culture canvas
+      // is the active tab.
+      if (ws === "cell-culture") { try { renderBadges(); } catch (e) { /* ignore */ } }
     }
   }
 
