@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.32", date: "2026-06-17", changes: [
+      "Cell Culture timeline rework: 'Tidy timeline' now draws donor·eye lane bands with labels, shows each vessel as a compact card (donor · passage · status · date), and routes passages as clean left→right curves",
+    ] },
     { version: "0.2.31", date: "2026-06-17", changes: [
       "Cell Culture Records redesigned: sticky column + donor·eye group headers, status & warning pills, cleaner toolbar, aligned (tabular) dates and passages",
     ] },

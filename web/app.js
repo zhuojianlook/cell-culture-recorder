@@ -392,6 +392,7 @@ let backendStateSyncTimer = null;
 let backendStateSyncInFlight = false;
 let backendStatePullInFlight = false;
 let isHydratingCanvas = false;
+let cultureLanes = []; // donor·eye lane bounds for the tidy-timeline overlay
 let localProjectStateRevision = 0;
 let backendInitialHydrationPending = false;
 let localProjectStateDirtySinceHydration = false;
@@ -2125,6 +2126,7 @@ function setActiveWorkspace(workspaceId) {
   updateLogPanel();
   renderAnimalHousingPanel();
   renderGlobalMilestones();
+  renderCultureLanes(); // self-gates: draws bands on the cell-culture map, clears elsewhere
 }
 
 function iconMarkNumber(mark) {
@@ -5639,6 +5641,28 @@ function updateAllConnections() {
       point.x = roundCoord(point.x);
       point.y = roundCoord(point.y);
     });
+    // Cell-culture passages (parent→child, left→right in time) get a clean
+    // lane-hugging cubic instead of the orthogonal route. Non-passage links are
+    // untouched, so every other workspace keeps the existing routing.
+    const passFrom = item.fromNode, passTo = item.toNode;
+    const isPassage = passFrom && passTo &&
+      getNodeWorkspace(passFrom) === "cell-culture" &&
+      isCultureVesselNode(passFrom) && isCultureVesselNode(passTo) &&
+      passTo.dataset.cultureParentNodeId === passFrom.dataset.nodeId;
+    const pa = item.points[0], pb = item.points[item.points.length - 1];
+    if (isPassage && pa && pb && pb.x > pa.x + 8) {
+      const cdx = Math.max(28, (pb.x - pa.x) * 0.45);
+      item.connection.el.setAttribute("d", `M${pa.x},${pa.y} C${pa.x + cdx},${pa.y} ${pb.x - cdx},${pb.y} ${pb.x},${pb.y}`);
+      item.connection.el.classList.add("link--passage");
+      item.connection.cachedPoints = [pa, { x: roundCoord((pa.x + pb.x) / 2), y: roundCoord((pa.y + pb.y) / 2) }, pb];
+      if (item.connection.topEl) {
+        const tail = Math.min(24, cdx);
+        item.connection.topEl.setAttribute("d", `M${pb.x - tail},${pb.y} L${pb.x},${pb.y}`);
+      }
+      updateConnectionProtocolDisplay(item.connection, item.connection.cachedPoints);
+      return;
+    }
+    item.connection.el.classList.remove("link--passage");
     item.connection.cachedPoints = item.points;
     const pathD = polylinePointsToRoundedPath(item.points, ROUTE_CORNER_RADIUS);
     item.connection.el.setAttribute("d", pathD);
@@ -5744,6 +5768,10 @@ window.wlpTidyCultureTimeline = function () {
     if (!it.node.dataset.spanDays) it.node.dataset.spanDays = "1";
   });
 
+  // Switch into tidy mode (vessel cards) BEFORE measuring widths, then place by
+  // date (x via resnap; snapY is skipped for tidy vessels so the lane tops stick).
+  canvas.classList.add("culture-timeline-tidy");
+  items.forEach((it) => renderCultureVesselCard(it.node));
   rebuildTimeline();
   resnapAllNodes(); // sets each node's x (left) from its absDay
 
@@ -5758,31 +5786,86 @@ window.wlpTidyCultureTimeline = function () {
   const lanes = Array.from(groups.values()).sort((a, b) =>
     String(a.donor).localeCompare(String(b.donor)) || String(a.eye).localeCompare(String(b.eye)));
 
-  const ROW_H = 58;
-  const LANE_GAP = 20;
-  let y = TIMELINE_HEIGHT + 18;
+  const ROW_H = 62, LANE_GAP = 22, LANE_PAD_TOP = 26;
+  cultureLanes = [];
+  let y = TIMELINE_HEIGHT + 14;
   lanes.forEach((lane) => {
     lane.items.sort((a, b) => (a.absUsed - b.absUsed) || (a.passage - b.passage));
     const rowEnds = [];
     lane.items.forEach((it) => {
       const left = parseFloat(it.node.style.left) || 0;
-      const w = it.node.offsetWidth || MIN_NODE_WIDTH;
+      const w = it.node.offsetWidth || 138;
       let row = 0;
-      while (row < rowEnds.length && rowEnds[row] > left - 16) row += 1;
+      while (row < rowEnds.length && rowEnds[row] > left - 12) row += 1;
       if (row === rowEnds.length) rowEnds.push(0);
       rowEnds[row] = left + w;
       it.row = row;
     });
     const rows = Math.max(1, rowEnds.length);
-    lane.items.forEach((it) => { it.node.style.top = `${y + it.row * ROW_H}px`; });
-    y += rows * ROW_H + LANE_GAP;
+    const rowsTop = y + LANE_PAD_TOP;
+    lane.items.forEach((it) => { it.node.style.top = `${rowsTop + it.row * ROW_H}px`; });
+    const label = (lane.donor || "Unknown donor") + (lane.eye && lane.eye !== "unknown" ? " · " + lane.eye : "");
+    cultureLanes.push({ label: label, top: y, height: LANE_PAD_TOP + rows * ROW_H, accent: cultureLaneAccent(lane.donor) });
+    y = rowsTop + rows * ROW_H + LANE_GAP;
   });
+  // Grow the canvas so tall donor sets scroll vertically instead of clipping.
+  canvas.style.minHeight = `${Math.max(y + 40, canvas.clientHeight)}px`;
+  renderCultureLanes();
 
   updateAllConnections();
   if (typeof window.wlpRenderCultureBadges === "function") window.wlpRenderCultureBadges();
   scheduleCanvasSync();
   showTaskToast(`Arranged ${items.length} vessel${items.length === 1 ? "" : "s"} by donor, eye and date.`);
 };
+
+// ── Tidy-timeline lane bands + vessel cards (Option A visuals) ──────────────
+// (cultureLanes is declared near the top with other module state to avoid a TDZ
+// when updateTimelineLayout runs during early init.)
+const CULTURE_LANE_PALETTE = ["#51afef", "#98be65", "#ECBE7B", "#46D9FF", "#c678dd", "#ff6c6b"];
+function cultureLaneAccent(donor) {
+  const s = String(donor || "");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return CULTURE_LANE_PALETTE[h % CULTURE_LANE_PALETTE.length];
+}
+// Draw the donor·eye lane bands as an overlay behind the nodes from the recorded
+// cultureLanes bounds. Self-gates on the active workspace; rebuilt on tidy + resize.
+function renderCultureLanes() {
+  let layer = document.getElementById("cultureLaneLayer");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.id = "cultureLaneLayer";
+    layer.className = "culture-lanes";
+    canvas.insertBefore(layer, canvas.firstChild);
+  }
+  if (activeWorkspaceId !== "cell-culture" || !cultureLanes.length) { layer.innerHTML = ""; return; }
+  layer.innerHTML = cultureLanes.map((ln) =>
+    '<div class="culture-lane" style="top:' + ln.top + "px;height:" + ln.height + 'px">' +
+      '<span class="culture-lane__label" style="--lane-accent:' + ln.accent + '">' + escapeHtml(ln.label) + "</span></div>"
+  ).join("");
+}
+// Compact card content for a vessel node (shown only under .culture-timeline-tidy).
+function renderCultureVesselCard(node) {
+  const donor = (node.dataset.cultureDonor || "").trim();
+  const eye = (node.dataset.cultureEye || "").trim();
+  const passage = node.dataset.culturePassage;
+  const date = node.dataset.cultureGroundTruthDate || node.dataset.cultureSeedDate || "";
+  const vessel = window.WLPCultureLogic ? window.WLPCultureLogic.vesselTypeFromIcon(node.dataset.iconId) : "";
+  node.style.setProperty("--lane-accent", cultureLaneAccent(donor));
+  let card = node.querySelector(".drop__card");
+  if (!card) { card = document.createElement("div"); card.className = "drop__card"; node.appendChild(card); }
+  const pChip = (passage != null && passage !== "") ? '<span class="p">P' + escapeHtml(String(passage)) + "</span>" : "";
+  const name = escapeHtml(donor || (eye && eye !== "unknown" ? eye : "vessel"));
+  const meta = escapeHtml(vessel) + (date ? " · " + escapeHtml(date) : "");
+  card.innerHTML = pChip + '<span class="donor">' + name + '</span><span class="meta">' + meta + "</span>";
+}
+function clearCultureTidy() {
+  canvas.classList.remove("culture-timeline-tidy");
+  cultureLanes = [];
+  canvas.style.minHeight = "";
+  const layer = document.getElementById("cultureLaneLayer");
+  if (layer) layer.innerHTML = "";
+}
 
 function getConnectionById(connectionId) {
   const id = String(connectionId || "").trim();
@@ -6311,6 +6394,8 @@ function updateTimelineLayout() {
   canvas.querySelectorAll(".drop").forEach((node) => {
     snapNodeToStoredDay(node);
   });
+  // Redraw the cell-culture lane bands at the new width after re-snap.
+  if (activeWorkspaceId === "cell-culture" && cultureLanes.length) renderCultureLanes();
 
   renderWeekendStripes();
   updateAllConnections();
@@ -7050,7 +7135,13 @@ function snapNodeToStoredDay(node) {
   let startDay = absDay - baseDay;
   const left = dayToLeft(startDay);
   const width = spanToWidth(span, node);
-  const { y: top } = snapY(parseFloat(node.style.top), node);
+  // In tidy mode, preserve each cell-culture vessel's exact top so the lane bands
+  // don't drift (snapY would re-round it to the 32px grid on resize/zoom).
+  const tidyVessel = canvas.classList.contains("culture-timeline-tidy") &&
+    node.dataset.workspace === "cell-culture" && isCultureVesselNode(node);
+  const { y: top } = tidyVessel
+    ? { y: parseFloat(node.style.top) || 0 }
+    : snapY(parseFloat(node.style.top), node);
   node.style.left = `${left}px`;
   node.style.width = `${width}px`;
   node.style.top = `${top}px`;
