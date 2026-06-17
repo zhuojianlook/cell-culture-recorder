@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.29", date: "2026-06-17", changes: [
+      "Cell Culture map: a 'Tidy timeline' button arranges vessels into donor·eye lanes at their seed/ground-truth date, so passages flow left→right with time",
+    ] },
     { version: "0.2.28", date: "2026-06-17", changes: [
       "Fix: the About window now fits inside the app and scrolls, instead of overflowing",
     ] },

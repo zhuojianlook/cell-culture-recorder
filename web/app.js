@@ -2064,6 +2064,9 @@ function applyWorkspaceVisibility() {
       ensureCageNodeSize(node);
     }
   });
+  // The "Tidy timeline" arrange button only makes sense on the Cell Culture map.
+  const tidyBtn = document.getElementById("tidyTimelineBtn");
+  if (tidyBtn) tidyBtn.style.display = activeWorkspaceId === "cell-culture" ? "" : "none";
 }
 
 function buildWorkspaceTabs() {
@@ -3993,6 +3996,10 @@ jumpTodayBtn?.addEventListener("click", () => {
   jumpToToday();
   hideNodeMenu();
 });
+document.getElementById("tidyTimelineBtn")?.addEventListener("click", () => {
+  hideNodeMenu();
+  window.wlpTidyCultureTimeline();
+});
 zoomInBtn?.addEventListener("click", () => {
   adjustDayCount(-3);
 });
@@ -5686,6 +5693,91 @@ window.wlpSyncAllLineageConnections = function () {
     const pid = child.dataset.cultureParentNodeId;
     if (pid) ensureLineageConnection(pid, child.dataset.nodeId || "");
   });
+};
+
+// "Tidy timeline" (Option A): arrange the Cell Culture map into a faceted timeline
+// — lanes by donor·eye, x = each vessel's ground-truth (or seed) date, sub-rows so
+// vessels at overlapping dates don't collide. Reuses the canvas day axis, so
+// lineage links read cleanly left→right with time. Triggered from the toolbar.
+window.wlpTidyCultureTimeline = function () {
+  const vessels = Array.from(canvas.querySelectorAll('.drop[data-workspace="cell-culture"]')).filter(isCultureVesselNode);
+  if (!vessels.length) { showTaskToast("No culture vessels to arrange yet."); return; }
+
+  const items = vessels.map((node) => {
+    const dateStr = node.dataset.cultureGroundTruthDate || node.dataset.cultureSeedDate || "";
+    const abs = parseYyyyMmDdToAbsDay(dateStr);
+    return {
+      node,
+      donor: String(node.dataset.cultureDonor || "").trim(),
+      eye: String(node.dataset.cultureEye || "").trim() || "unknown",
+      passage: Number(node.dataset.culturePassage || "0") || 0,
+      abs: Number.isFinite(abs) ? abs : NaN,
+    };
+  });
+
+  // Fit the shared timeline window to the vessels' date range (undated vessels
+  // park at the right edge).
+  const dated = items.filter((it) => Number.isFinite(it.abs));
+  let baseAbs;
+  if (dated.length) {
+    const minAbs = Math.min.apply(null, dated.map((it) => it.abs));
+    const maxAbs = Math.max.apply(null, dated.map((it) => it.abs));
+    baseAbs = minAbs - 2;
+    dayCount = clamp((maxAbs - minAbs) + 4, MIN_DAY_COUNT, MAX_DAY_COUNT);
+  } else {
+    baseAbs = getBaseDay();
+  }
+  startDate = new Date(baseAbs * DAY_MS);
+  startDate.setHours(0, 0, 0, 0);
+
+  const lastAbs = baseAbs + dayCount - 1;
+  items.forEach((it) => {
+    const abs = Number.isFinite(it.abs) ? it.abs : lastAbs;
+    it.absUsed = abs;
+    it.node.dataset.absDay = String(abs);
+    it.node.dataset.startDay = String(abs - baseAbs);
+    it.node.dataset.dayIndex = String(Math.floor(abs - baseAbs));
+    if (!it.node.dataset.spanDays) it.node.dataset.spanDays = "1";
+  });
+
+  rebuildTimeline();
+  resnapAllNodes(); // sets each node's x (left) from its absDay
+
+  // Lanes by donor·eye (ordered like the records table); sub-rows within a lane
+  // greedily avoid horizontal overlap. Set y AFTER resnap so it sticks.
+  const groups = new Map();
+  items.forEach((it) => {
+    const key = it.donor.toLowerCase() + "|" + it.eye;
+    if (!groups.has(key)) groups.set(key, { donor: it.donor, eye: it.eye, items: [] });
+    groups.get(key).items.push(it);
+  });
+  const lanes = Array.from(groups.values()).sort((a, b) =>
+    String(a.donor).localeCompare(String(b.donor)) || String(a.eye).localeCompare(String(b.eye)));
+
+  const ROW_H = 58;
+  const LANE_GAP = 20;
+  let y = TIMELINE_HEIGHT + 18;
+  lanes.forEach((lane) => {
+    lane.items.sort((a, b) => (a.absUsed - b.absUsed) || (a.passage - b.passage));
+    const rowEnds = [];
+    lane.items.forEach((it) => {
+      const left = parseFloat(it.node.style.left) || 0;
+      const w = it.node.offsetWidth || MIN_NODE_WIDTH;
+      let row = 0;
+      while (row < rowEnds.length && rowEnds[row] > left - 16) row += 1;
+      if (row === rowEnds.length) rowEnds.push(0);
+      rowEnds[row] = left + w;
+      it.row = row;
+    });
+    const rows = Math.max(1, rowEnds.length);
+    lane.items.forEach((it) => { it.node.style.top = `${y + it.row * ROW_H}px`; });
+    y += rows * ROW_H + LANE_GAP;
+  });
+
+  updateAllConnections();
+  if (typeof window.wlpRenderCultureBadges === "function") window.wlpRenderCultureBadges();
+  scheduleCanvasSync();
+  showTaskToast(`Arranged ${items.length} vessel${items.length === 1 ? "" : "s"} by donor, eye and date.`);
 };
 
 function getConnectionById(connectionId) {
