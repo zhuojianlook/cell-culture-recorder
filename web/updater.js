@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.30", date: "2026-06-17", changes: [
+      "Fix: passages can no longer link across donors/eyes (a passage stays within one donor·eye); existing impossible links auto-repair on load",
+      "Fix: the About dialog's changelog now scrolls in its own area, so expanding it no longer pushes the dialog past the window",
+    ] },
     { version: "0.2.29", date: "2026-06-17", changes: [
       "Cell Culture map: a 'Tidy timeline' button arranges vessels into donor·eye lanes at their seed/ground-truth date, so passages flow left→right with time",
     ] },
@@ -175,9 +179,12 @@
           '</div>' +
           '<hr style="border:0;border-top:1px solid rgba(130, 138, 148,.18);margin:14px 0">' +
           // Changelog (collapsible)
-          '<details>' +
-            '<summary style="cursor:pointer;color:#bbc2cf;font-size:.8rem;font-weight:600;user-select:none">Changelog</summary>' +
-            '<div id="wlpAboutLog" style="margin-top:10px"></div>' +
+          // Changelog: its own bounded scroll region with a sticky toggle, so
+          // expanding it can never grow the dialog past the window and the
+          // collapse control stays reachable. (top:-14px cancels the body padding.)
+          '<details style="position:relative">' +
+            '<summary style="position:sticky;top:-14px;z-index:1;background:#21242b;padding:4px 0;cursor:pointer;color:#bbc2cf;font-size:.8rem;font-weight:600;user-select:none">Changelog</summary>' +
+            '<div id="wlpAboutLog" style="margin-top:10px;max-height:40vh;overflow:auto"></div>' +
           '</details>' +
         '</div>' +
         '<div class="modal__footer" style="display:flex;justify-content:flex-end;padding:14px 16px;flex:0 0 auto">' +

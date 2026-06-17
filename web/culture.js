@@ -354,8 +354,11 @@
     sel.innerHTML = '<option value="">— none —</option>';
     var peerRecords = allRecords();
     var selfId = node.dataset.nodeId || "";
+    var selfRec = recordOf(node);
     otherVessels(node).forEach(function (n) {
       var cid = n.dataset.nodeId || "";
+      // A passage parent must be the same donor + eye.
+      if (!LOGIC().sameDonorEye(selfRec, recordOf(n))) return;
       if (LOGIC().wouldCreateCycle(peerRecords, selfId, cid)) return;
       var opt = document.createElement("option");
       opt.value = cid;
@@ -391,7 +394,14 @@
     write(node, "Seeding", val("wlpcSeeding").value.trim());
     write(node, "Incubator", val("wlpcIncubator").value.trim());
     write(node, "SeedDate", val("wlpcSeedDate").value);
-    write(node, "ParentNodeId", val("wlpcParent").value);
+    // Donor/Eye were just written above; drop the lineage parent if it's no longer
+    // the same donor+eye (e.g. the user changed donor/eye after picking a parent).
+    var chosenParent = val("wlpcParent").value;
+    if (chosenParent) {
+      var parentNode = document.querySelector('.drop[data-node-id="' + chosenParent + '"]');
+      if (parentNode && !LOGIC().sameDonorEye(recordOf(node), recordOf(parentNode))) chosenParent = "";
+    }
+    write(node, "ParentNodeId", chosenParent);
     write(node, "Notes", val("wlpcNotes").value.trim());
     // Provenance / source-tracking — store enums only when non-default, so a
     // plain vessel keeps a lean dataset.
@@ -823,26 +833,27 @@
     var created = parsed.drafts.map(function (d, i) {
       return { draft: d, nodeId: window.wlpCreateCultureVessel(d, i) };
     });
-    // Resolve parent labels to just-created vessels.
-    var byLabel = {};
-    created.forEach(function (c) {
-      importLabelKeys(c.draft).forEach(function (k) { if (k && !byLabel[k]) byLabel[k] = c.nodeId; });
-    });
+    // Resolve each parent label ONLY among vessels that share the child's donor+eye
+    // (a passage is always within one tissue), so a bare label like "P0" can't bind
+    // across donors. Cycle-guarded.
     var linked = 0;
     created.forEach(function (c) {
       var pl = String(c.draft.parentLabel || "").replace(/\s+/g, " ").trim().toLowerCase();
       if (!pl) return;
-      var pid = byLabel[pl];
-      if (pid && pid !== c.nodeId) {
-        var node = document.querySelector('.drop[data-node-id="' + c.nodeId + '"]');
-        // Don't link if it would create a lineage cycle (mutually-referencing
-        // parent labels in the CSV).
-        var recs = allCultureVessels().map(function (n) {
-          return { nodeId: n.dataset.nodeId || "", parentNodeId: n.dataset.cultureParentNodeId || "" };
-        });
-        if (node && !LOGIC().wouldCreateCycle(recs, c.nodeId, pid)) {
-          node.dataset.cultureParentNodeId = pid; linked++;
-        }
+      var match = null;
+      for (var i = 0; i < created.length; i++) {
+        var cand = created[i];
+        if (cand.nodeId === c.nodeId) continue;
+        if (!LOGIC().sameDonorEye(c.draft, cand.draft)) continue;
+        if (importLabelKeys(cand.draft).indexOf(pl) >= 0) { match = cand; break; }
+      }
+      if (!match) return;
+      var node = document.querySelector('.drop[data-node-id="' + c.nodeId + '"]');
+      var recs = allCultureVessels().map(function (n) {
+        return { nodeId: n.dataset.nodeId || "", parentNodeId: n.dataset.cultureParentNodeId || "" };
+      });
+      if (node && !LOGIC().wouldCreateCycle(recs, c.nodeId, match.nodeId)) {
+        node.dataset.cultureParentNodeId = match.nodeId; linked++;
       }
     });
     // Draw the imported lineage as real node-to-node passage connections.

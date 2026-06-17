@@ -155,6 +155,29 @@ test("danglingChildIds finds lineage pointers to deleted vessels (M2)", () => {
   assert.deepEqual(L.danglingChildIds([]), []);
 });
 
+test("sameDonorEye: same donor+eye, case-insensitive, with wildcards (issue 4)", () => {
+  assert.equal(L.sameDonorEye({ donor: "6769", eye: "OD" }, { donor: "6769", eye: "OD" }), true);
+  assert.equal(L.sameDonorEye({ donor: "6769", eye: "od" }, { donor: "6769", eye: "OD" }), true);
+  assert.equal(L.sameDonorEye({ donor: "6769", eye: "OD" }, { donor: "7012", eye: "OS" }), false);
+  assert.equal(L.sameDonorEye({ donor: "6769", eye: "OD" }, { donor: "6769", eye: "OS" }), false);
+  assert.equal(L.sameDonorEye({ donor: "6769", eye: "OD" }, { donor: "9999", eye: "OD" }), false);
+  // wildcards: blank donor or blank/"unknown" eye matches anything
+  assert.equal(L.sameDonorEye({ donor: "", eye: "OD" }, { donor: "6769", eye: "OD" }), true);
+  assert.equal(L.sameDonorEye({ donor: "6769", eye: "unknown" }, { donor: "6769", eye: "OS" }), true);
+  assert.equal(L.sameDonorEye({ donor: "6769", eye: "" }, { donor: "6769", eye: "OD" }), true);
+});
+
+test("crossDonorChildIds finds impossible cross-donor parents (issue 4)", () => {
+  const recs = [
+    { nodeId: "n-1", donor: "6769", eye: "OD" },
+    { nodeId: "n-2", donor: "6769", eye: "OD", parentNodeId: "n-1" }, // ok
+    { nodeId: "n-3", donor: "7012", eye: "OS", parentNodeId: "n-1" }, // cross-donor -> flagged
+    { nodeId: "n-4", donor: "6769", eye: "OD", parentNodeId: "n-99" }, // parent gone -> not flagged here
+  ];
+  assert.deepEqual(L.crossDonorChildIds(recs), ["n-3"]);
+  assert.deepEqual(L.crossDonorChildIds([]), []);
+});
+
 test("childrenOf returns direct children", () => {
   const recs = [
     { nodeId: "n-1" },

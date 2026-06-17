@@ -344,6 +344,35 @@
       .map(function (r) { return str(r.nodeId); });
   }
 
+  // A lineage parent/child must be the SAME donor + eye — a passage is always
+  // within one tissue. Case-insensitive; a blank donor or blank/"unknown" eye on
+  // either side is a wildcard (so partially-filled records still link rather than
+  // being wrongly rejected). Used by CSV import, the editor dropdown, the canvas
+  // connection coupling, and the load-time migration below.
+  function sameDonorEye(a, b) {
+    a = a || {}; b = b || {};
+    var da = str(a.donor).trim().toLowerCase(), db = str(b.donor).trim().toLowerCase();
+    if (da && db && da !== db) return false;
+    var ea = str(a.eye).trim().toLowerCase(), eb = str(b.eye).trim().toLowerCase();
+    function blankEye(e) { return e === "" || e === "unknown"; }
+    if (!blankEye(ea) && !blankEye(eb) && ea !== eb) return false;
+    return true;
+  }
+
+  // nodeIds whose parent points at a vessel of a DIFFERENT donor+eye (an
+  // impossible passage — e.g. an older CSV import that resolved a parent label
+  // across donors). Cleared on load so existing projects self-heal.
+  function crossDonorChildIds(records) {
+    var byId = {};
+    (records || []).forEach(function (r) { byId[str(r.nodeId)] = r; });
+    return (records || [])
+      .filter(function (r) {
+        var p = str(r.parentNodeId) ? byId[str(r.parentNodeId)] : null;
+        return p && !sameDonorEye(r, p);
+      })
+      .map(function (r) { return str(r.nodeId); });
+  }
+
   // nodeIds of the direct children of a vessel.
   function childrenOf(records, parentNodeId) {
     var pid = str(parentNodeId);
@@ -692,6 +721,8 @@
     maxNodeIdNumber: maxNodeIdNumber,
     nextNodeIdCounter: nextNodeIdCounter,
     danglingChildIds: danglingChildIds,
+    sameDonorEye: sameDonorEye,
+    crossDonorChildIds: crossDonorChildIds,
     childrenOf: childrenOf,
     wouldCreateCycle: wouldCreateCycle,
   };

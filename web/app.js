@@ -5420,7 +5420,11 @@ function addConnection(fromNode, fromDir, toNode, toDir, options = {}) {
       });
       cycles = CL.wouldCreateCycle(recs, toId, fromId);
     }
-    if (cycles) {
+    const parentRec = { donor: fromNode.dataset.cultureDonor || "", eye: fromNode.dataset.cultureEye || "" };
+    const childRec = { donor: toNode.dataset.cultureDonor || "", eye: toNode.dataset.cultureEye || "" };
+    if (CL && CL.sameDonorEye && !CL.sameDonorEye(parentRec, childRec)) {
+      showTaskToast("A passage must be the same donor and eye — link not recorded as lineage.");
+    } else if (cycles) {
       showTaskToast("That link would create a lineage cycle — not recorded as a passage.");
     } else {
       toNode.dataset.cultureParentNodeId = fromId;
@@ -15370,14 +15374,25 @@ function deserializeCanvasState(data) {
       const records = [];
       const byId = {};
       canvas.querySelectorAll('.drop[data-workspace="cell-culture"]').forEach((n) => {
-        const rec = { nodeId: n.dataset.nodeId || "", parentNodeId: n.dataset.cultureParentNodeId || "" };
+        const rec = {
+          nodeId: n.dataset.nodeId || "", parentNodeId: n.dataset.cultureParentNodeId || "",
+          donor: n.dataset.cultureDonor || "", eye: n.dataset.cultureEye || "",
+        };
         records.push(rec);
         byId[rec.nodeId] = n;
       });
+      // Drop parents whose node is gone (dangling) AND parents of a different
+      // donor+eye (impossible passages from older imports) so projects self-heal.
       CL.danglingChildIds(records).forEach((cid) => {
         const n = byId[cid];
         if (n) delete n.dataset.cultureParentNodeId;
       });
+      if (CL.crossDonorChildIds) {
+        CL.crossDonorChildIds(records).forEach((cid) => {
+          const n = byId[cid];
+          if (n) delete n.dataset.cultureParentNodeId;
+        });
+      }
     }
   } catch { /* */ }
 
