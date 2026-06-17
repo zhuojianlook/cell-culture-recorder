@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.31", date: "2026-06-17", changes: [
+      "Cell Culture Records redesigned: sticky column + donor·eye group headers, status & warning pills, cleaner toolbar, aligned (tabular) dates and passages",
+    ] },
     { version: "0.2.30", date: "2026-06-17", changes: [
       "Fix: passages can no longer link across donors/eyes (a passage stays within one donor·eye); existing impossible links auto-repair on load",
       "Fix: the About dialog's changelog now scrolls in its own area, so expanding it no longer pushes the dialog past the window",

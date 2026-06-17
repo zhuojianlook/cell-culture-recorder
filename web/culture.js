@@ -447,9 +447,10 @@
     if (view && view.style.display !== "none") renderView();
   }
 
-  // Status → a small colour for badges/grid.
+  // Status → a small colour for pills/badges/grid/tree (shared so all surfaces
+  // agree). Green = healthy/active; cyan = frozen; red = contaminated; grey = discarded.
   function statusColor(s) {
-    return { active: "#51afef", frozen: "#7dd3fc", contaminated: "#ff7b7b", discarded: "#828a94" }[s] || "#828a94";
+    return { active: "#98be65", frozen: "#46d9ff", contaminated: "#ff6c6b", discarded: "#828a94" }[s] || "#828a94";
   }
 
   // ─── Map integration: per-node status + warning badges ────────────────────
@@ -559,15 +560,12 @@
     if (!workspace) return null;
     view = document.createElement("section");
     view.id = "wlpcRecordsView";
-    view.style.cssText =
-      "flex:1;margin:18px;border:1px solid rgba(130, 138, 148,.18);border-radius:18px;" +
-      "background:#21242b;overflow:auto;display:none";
+    view.className = "wlpc-view";
     view.innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;' +
-      'border-bottom:1px solid rgba(130, 138, 148,.12);position:sticky;top:0;background:#21242b;z-index:1">' +
-        '<div><h2 style="margin:0;font-size:1.15rem;color:#bbc2cf">Cell Culture Records</h2>' +
-        '<div id="wlpcGridSub" style="font-size:.8125rem;color:#828a94;margin-top:2px"></div></div>' +
-        '<div style="display:flex;align-items:center;gap:10px">' +
+      '<div class="wlpc-toolbar">' +
+        '<div><h2 class="wlpc-toolbar__title">Cell Culture Records</h2>' +
+          '<div id="wlpcGridSub" class="wlpc-toolbar__sub"></div></div>' +
+        '<div class="wlpc-toolbar__actions">' +
           '<div style="display:flex;align-items:center;gap:6px">' +
             '<select id="wlpcAddType" class="modal__input" style="width:auto" title="Vessel type for the new record">' +
               vesselTypeOptions() +
@@ -576,25 +574,22 @@
           "</div>" +
           '<button type="button" id="wlpcImport" class="btn" title="Import vessels from a CSV file">Import CSV</button>' +
           '<input type="file" id="wlpcImportFile" accept=".csv,text/csv" style="display:none">' +
-          '<div style="display:flex;border:1px solid rgba(130, 138, 148,.25);border-radius:8px;overflow:hidden">' +
-            '<button type="button" id="wlpcModeTable" class="btn" style="border:0;border-radius:0;padding:6px 14px">Table</button>' +
-            '<button type="button" id="wlpcModeTree" class="btn" style="border:0;border-radius:0;padding:6px 14px">Tree</button>' +
+          '<div class="wlpc-seg">' +
+            '<button type="button" id="wlpcModeTable">Table</button>' +
+            '<button type="button" id="wlpcModeTree">Tree</button>' +
           '</div>' +
         '</div>' +
       '</div>' +
-      '<div style="display:flex;gap:10px;align-items:center;padding:10px 16px;flex-wrap:wrap;' +
-        'border-bottom:1px solid rgba(130, 138, 148,.08)">' +
-        '<input type="search" id="wlpcSearch" class="modal__input" placeholder="Search donor, label, medium, vessel…" style="flex:1;min-width:170px">' +
+      '<div class="wlpc-filters">' +
+        '<input type="search" id="wlpcSearch" class="modal__input" placeholder="Search donor, label, medium, vessel…">' +
         '<select id="wlpcStatusFilter" class="modal__input" style="width:auto">' +
           '<option value="all">All statuses</option>' +
           STATUSES.map(function (s) { return '<option value="' + s + '">' + s.charAt(0).toUpperCase() + s.slice(1) + "</option>"; }).join("") +
         "</select>" +
-        '<label style="display:flex;align-items:center;gap:6px;font-size:.8rem;color:#828a94;white-space:nowrap">' +
-          '<input type="checkbox" id="wlpcNeedsAttn"> Needs attention</label>' +
+        '<label class="wlpc-check"><input type="checkbox" id="wlpcNeedsAttn"> Needs attention</label>' +
       "</div>" +
-      '<div id="wlpcImportStatus" style="display:none;margin:0 16px;padding:8px 12px;border-radius:8px;' +
-        'background:rgba(81, 175, 239,.12);color:#51afef;font-size:.82rem"></div>' +
-      '<div id="wlpcGridBody" style="padding:8px 16px 22px"></div>';
+      '<div id="wlpcImportStatus" class="wlpc-banner wlpc-banner--info" style="display:none"></div>' +
+      '<div id="wlpcGridBody"></div>';
     workspace.appendChild(view);
     view.querySelector("#wlpcSearch").addEventListener("input", function (e) { filterQuery = e.target.value; renderView(); });
     view.querySelector("#wlpcStatusFilter").addEventListener("change", function (e) { filterStatus = e.target.value; renderView(); });
@@ -619,10 +614,9 @@
   }
   function updateModeButtons() {
     if (!view) return;
-    var on = "#21364f", onText = "#51afef", off = "transparent", offText = "#828a94";
     var t = view.querySelector("#wlpcModeTable"), r = view.querySelector("#wlpcModeTree");
-    if (t) { t.style.background = viewMode === "table" ? on : off; t.style.color = viewMode === "table" ? onText : offText; }
-    if (r) { r.style.background = viewMode === "tree" ? on : off; r.style.color = viewMode === "tree" ? onText : offText; }
+    if (t) t.classList.toggle("is-active", viewMode === "table");
+    if (r) r.classList.toggle("is-active", viewMode === "tree");
   }
   function renderView() {
     if (viewMode === "tree") renderTree();
@@ -639,9 +633,8 @@
   }
   function emptyMessage(filtered) {
     return filtered
-      ? '<p style="color:#828a94;padding:40px 24px;text-align:center">No vessels match the current filter.</p>'
-      : '<p style="color:#828a94;padding:40px 24px;text-align:center;line-height:1.6">No vessels yet.<br>' +
-        'Switch to the <strong style="color:#bbc2cf">Cell Culture</strong> tab, drop a flask/dish/cell line ' +
+      ? '<p class="wlpc-empty">No vessels match the current filter.</p>'
+      : '<p class="wlpc-empty">No vessels yet.<br>Switch to the <strong>Cell Culture</strong> tab, drop a flask/dish/cell line ' +
         "onto the timeline, then double-click it to add its record, or use <strong>Import CSV</strong>.</p>";
   }
 
@@ -683,47 +676,42 @@
     function vesselRow(n) {
       var w = warningsFor(n, peers);
       var status = read(n, "Status", "active");
+      var pass = read(n, "Passage", "");
       var warn = w.length
-        ? '<span title="' + esc(w.join(", ")) + '" style="color:#ff7b7b">&#9888; ' + w.length + "</span>"
-        : '<span style="color:#454a52">&#10003;</span>';
+        ? '<span class="wlpc-warn" title="' + esc(w.join(", ")) + '">&#9888; ' + w.length + "</span>"
+        : '<span class="wlpc-ok">&#10003;</span>';
       return (
-        '<tr data-node-id="' + esc(n.dataset.nodeId) + '" style="cursor:pointer;border-top:1px solid rgba(130, 138, 148,.10)">' +
-        // Indented label so passages read as nested under the donor+eye header.
-        '<td style="padding:8px 10px 8px 26px;font-weight:600">' + esc(nodeLabel(n)) + "</td>" +
-        td(read(n, "Passage", "") !== "" ? "P" + esc(read(n, "Passage", "")) : "") +
-        td(esc(vesselTypeFromIcon(n))) +
-        '<td style="padding:8px 10px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;' +
-          'background:' + statusColor(status) + ';margin-right:6px"></span>' + esc(status) + "</td>" +
-        td(esc(read(n, "Medium", ""))) +
-        td(esc(read(n, "SeedDate", ""))) +
-        td(parentLabelOf(n)) +
-        '<td style="padding:8px 10px;text-align:center">' + warn + "</td>" +
+        '<tr data-node-id="' + esc(n.dataset.nodeId) + '">' +
+        '<td class="wlpc-col-label">' + esc(nodeLabel(n)) + "</td>" +
+        '<td class="wlpc-col-p">' + (pass !== "" ? "P" + esc(pass) : "") + "</td>" +
+        "<td>" + esc(vesselTypeFromIcon(n)) + "</td>" +
+        '<td><span class="wlpc-pill" style="color:' + statusColor(status) + '">' +
+          esc(status.charAt(0).toUpperCase() + status.slice(1)) + "</span></td>" +
+        "<td>" + esc(read(n, "Medium", "")) + "</td>" +
+        '<td class="wlpc-col-date">' + esc(read(n, "SeedDate", "")) + "</td>" +
+        "<td>" + parentLabelOf(n) + "</td>" +
+        '<td class="wlpc-col-warn">' + warn + "</td>" +
         "</tr>"
       );
     }
 
     var bodyRows = groups.map(function (g) {
       var warnN = g.nodes.filter(function (n) { return warningsFor(n, peers).length; }).length;
-      var meta = g.nodes.length + (g.nodes.length === 1 ? " vessel" : " vessels") +
-        (warnN ? " · " + warnN + " need attention" : "");
+      var countChip = '<span class="wlpc-chip">' + g.nodes.length + (g.nodes.length === 1 ? " vessel" : " vessels") + "</span>";
+      var warnChip = warnN ? '<span class="wlpc-chip wlpc-chip--warn">' + warnN + " to check</span>" : "";
       var header =
-        '<tr style="background:rgba(81, 175, 239,.07)">' +
-          '<td colspan="8" style="padding:10px 12px;border-top:1px solid rgba(130, 138, 148,.20)">' +
-            '<span style="color:#51afef;font-weight:600">' + esc(g.label) + "</span> " +
-            '<span style="color:#828a94;font-size:.72rem">· ' + esc(meta) + "</span>" +
-          "</td></tr>";
+        '<tr class="wlpc-group"><td colspan="8">' +
+          '<span class="wlpc-group__name">' + esc(g.label) + "</span>" + countChip + warnChip +
+        "</td></tr>";
       return header + g.nodes.map(vesselRow).join("");
     }).join("");
 
     body.innerHTML =
-      '<table style="width:100%;border-collapse:collapse;font-size:.8125rem;color:#bbc2cf">' +
-      '<thead><tr style="color:#828a94;text-align:left">' +
+      '<table class="wlpc-table"><thead><tr>' +
         th("Vessel / label") + th("P#") + th("Type") + th("Status") + th("Medium") +
         th("Seed date") + th("Lineage parent") + th("⚠") +
       "</tr></thead><tbody>" + bodyRows + "</tbody></table>";
     Array.prototype.forEach.call(body.querySelectorAll("tr[data-node-id]"), function (tr) {
-      tr.addEventListener("mouseenter", function () { tr.style.background = "rgba(130, 138, 148,.06)"; });
-      tr.addEventListener("mouseleave", function () { tr.style.background = ""; });
       tr.addEventListener("click", function () {
         var id = tr.getAttribute("data-node-id");
         var node = document.querySelector('.drop[data-node-id="' + id + '"]');
@@ -738,8 +726,7 @@
       });
     });
   }
-  function td(html, extra) { return '<td style="padding:8px 10px;' + (extra || "") + '">' + html + "</td>"; }
-  function th(t) { return '<th style="padding:8px 10px;font-weight:600">' + t + "</th>"; }
+  function th(t) { return "<th>" + t + "</th>"; }
   function parentLabelOf(n) {
     var pid = read(n, "ParentNodeId", "");
     if (!pid) return "";
@@ -752,9 +739,8 @@
   }
 
   // Wire a clickable row/tree-node -> jump to the Cell Culture timeline + edit.
+  // (Hover is handled by CSS :hover on .wlpc-tree-row.)
   function wireRowClick(el) {
-    el.addEventListener("mouseenter", function () { el.style.background = "rgba(130, 138, 148,.06)"; });
-    el.addEventListener("mouseleave", function () { el.style.background = ""; });
     el.addEventListener("click", function () {
       var id = el.getAttribute("data-node-id");
       var node = document.querySelector('.drop[data-node-id="' + id + '"]');
@@ -787,9 +773,8 @@
     if (!view) return;
     var box = view.querySelector("#wlpcImportStatus");
     if (!box) return;
+    box.className = "wlpc-banner " + (isError ? "wlpc-banner--err" : "wlpc-banner--info");
     box.style.display = "";
-    box.style.background = isError ? "rgba(252,165,165,.12)" : "rgba(81, 175, 239,.12)";
-    box.style.color = isError ? "#ff7b7b" : "#51afef";
     box.textContent = msg;
     setTimeout(function () { if (box) box.style.display = "none"; }, 6000);
   }
@@ -894,8 +879,7 @@
         var group = (String(r.donor || "").trim() || "Unknown donor") +
           (r.eye && r.eye !== "unknown" ? " · " + r.eye : "");
         if (group !== lastGroup) {
-          html += '<div style="margin:14px 6px 4px;color:#828a94;font-size:.72rem;letter-spacing:.04em;' +
-            'text-transform:uppercase;font-weight:600">' + esc(group) + "</div>";
+          html += '<div class="wlpc-tree-group">' + esc(group) + "</div>";
           lastGroup = group;
         }
       }
@@ -906,10 +890,9 @@
       var connector = item.depth > 0 ? '<span style="color:#454a52">&#9492;&#9472; </span>' : "";
       var meta = (r.passage !== "" && r.passage != null ? "P" + r.passage + " · " : "") +
         esc(LOGIC().vesselTypeFromIcon(r.iconId)) + " · " + esc(r.status || "active");
-      var warn = warnN ? ' <span style="color:#ff7b7b;font-size:.72rem">&#9888; ' + warnN + "</span>" : "";
+      var warn = warnN ? ' <span class="wlpc-warn">&#9888; ' + warnN + "</span>" : "";
       html +=
-        '<div data-node-id="' + esc(r.nodeId) + '" style="cursor:pointer;padding:6px 10px;padding-left:' +
-        indent + 'px;border-radius:6px;font-size:.82rem;color:#bbc2cf">' +
+        '<div class="wlpc-tree-row" data-node-id="' + esc(r.nodeId) + '" style="padding-left:' + indent + 'px">' +
         connector + dot + "<strong>" + esc(recordName(r)) + "</strong> " +
         '<span style="color:#828a94">' + meta + "</span>" + warn + "</div>";
     });
