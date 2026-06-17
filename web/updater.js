@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.28", date: "2026-06-17", changes: [
+      "Fix: the About window now fits inside the app and scrolls, instead of overflowing",
+    ] },
     { version: "0.2.27", date: "2026-06-17", changes: [
       "Map: each vessel now shows a status dot + warning badge on the Cell Culture canvas",
       "Editor: 'View in Records' jumps from a vessel to its row in the records table",
@@ -140,12 +143,12 @@
     backdrop.className = "modal-backdrop modal-backdrop--center is-hidden";
     backdrop.style.zIndex = "100000";
     backdrop.innerHTML =
-      '<div class="modal" style="margin-top:6vh;max-width:560px;width:560px;max-height:84vh;display:flex;flex-direction:column">' +
-        '<div class="modal__header" style="display:flex;align-items:center;justify-content:space-between">' +
+      '<div class="modal" style="width:min(600px,92vw);max-height:calc(100vh - 64px);display:flex;flex-direction:column;overflow:hidden">' +
+        '<div class="modal__header" style="display:flex;align-items:center;justify-content:space-between;flex:0 0 auto">' +
           '<h3 style="margin:0">About</h3>' +
           '<button type="button" id="wlpAboutX" class="btn" title="Close" style="padding:2px 9px">&times;</button>' +
         '</div>' +
-        '<div class="modal__body" style="overflow:auto">' +
+        '<div class="modal__body" style="flex:1 1 auto;min-height:0;overflow:auto">' +
           '<div style="text-align:center;padding:10px 0 4px">' +
             '<div style="font-size:1.3rem;font-weight:700;color:#bbc2cf">' + esc(APP_NAME) + '</div>' +
             '<div id="wlpAboutVer" style="color:#828a94;font-size:.85rem;margin-top:2px"></div>' +
@@ -174,7 +177,7 @@
             '<div id="wlpAboutLog" style="margin-top:10px"></div>' +
           '</details>' +
         '</div>' +
-        '<div class="modal__footer" style="display:flex;justify-content:flex-end;padding:14px 16px">' +
+        '<div class="modal__footer" style="display:flex;justify-content:flex-end;padding:14px 16px;flex:0 0 auto">' +
           '<button type="button" id="wlpAboutClose" class="btn btn--primary">Close</button>' +
         '</div>' +
       '</div>';
