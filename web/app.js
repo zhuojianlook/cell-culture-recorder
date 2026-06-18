@@ -877,6 +877,312 @@ window.wlpOpenVesselProtocol = function (node) {
     else showTaskToast("Couldn't find the passage link for this vessel.");
   } catch (e) { /* ignore */ }
 };
+
+// ── Vessel ↔ storage-box placement ──────────────────────────────────────────
+// Let a vessel (typically a frozen one) be placed into a real Storage Box slot —
+// the same boxes used for reagent aliquots. The slot occupant carries a back-
+// reference to the vessel's nodeId (so the link survives renames) and the vessel
+// node remembers where it was stored. Reuses the box grid + persistence already
+// built for aliquots; vessel occupants are tagged `kind:"vessel"` so they render
+// distinctly and never collide with `{name,lot,vol}` aliquot cells.
+window.wlpPlaceVesselInBox = function (node) {
+  try { if (node) openVesselStoreModal(node); } catch (e) { /* ignore */ }
+};
+
+let vesselStoreModal = null;
+let vesselStoreNode = null;
+let vesselStoreBoxIndex = -1;
+let vesselStoreSlot = -1;
+
+function ensureBoxId(box) {
+  if (box && !box.id) {
+    box.id = `box-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+  }
+  return box ? box.id : "";
+}
+
+function findBoxIndexById(id) {
+  if (!id) return -1;
+  for (let i = 0; i < storageBoxes.length; i++) {
+    if (storageBoxes[i] && storageBoxes[i].id === id) return i;
+  }
+  return -1;
+}
+
+// A compact, grid-friendly code for a vessel occupant: donor first (most
+// distinguishing), else its passage. Full label lives in the cell tooltip.
+function vesselCellCode(donor, passage) {
+  const d = String(donor || "").replace(/\s+/g, "");
+  if (d) return d.slice(0, 4).toUpperCase();
+  const p = String(passage || "").trim();
+  return p !== "" ? "P" + p : "VES";
+}
+
+function vesselOccupantFromNode(node) {
+  const donor = node.dataset.cultureDonor || "";
+  const eye = node.dataset.cultureEye || "";
+  const passage = node.dataset.culturePassage || "";
+  const status = node.dataset.cultureStatus || "";
+  const ta = node.querySelector(".node-label");
+  const label =
+    (ta && ta.value && ta.value.trim()) ||
+    (donor
+      ? donor +
+        (eye && eye !== "unknown" ? " " + eye : "") +
+        (passage !== "" ? " P" + passage : "")
+      : "Vessel");
+  return {
+    kind: "vessel",
+    nodeId: node.dataset.nodeId || "",
+    name: label, // keep `name` populated for legacy cell renderers
+    code: vesselCellCode(donor, passage),
+    label,
+    donor,
+    eye,
+    passage,
+    status,
+  };
+}
+
+// Clear this vessel from every box slot it currently occupies (a vessel lives in
+// at most one slot). Returns true if anything was removed.
+function removeVesselFromAllBoxes(nodeId) {
+  if (!nodeId) return false;
+  let removed = false;
+  storageBoxes.forEach((box) => {
+    if (!box || !Array.isArray(box.cells)) return;
+    for (let i = 0; i < box.cells.length; i++) {
+      const c = box.cells[i];
+      if (c && c.kind === "vessel" && c.nodeId === nodeId) {
+        box.cells[i] = null;
+        removed = true;
+      }
+    }
+  });
+  return removed;
+}
+
+function ensureVesselStoreModal() {
+  if (vesselStoreModal) return;
+  vesselStoreModal = document.createElement("div");
+  vesselStoreModal.className = "modal-backdrop modal-backdrop--center is-hidden";
+  vesselStoreModal.innerHTML =
+    '<div class="modal" style="max-width:540px">' +
+      '<div class="modal__header">' +
+        '<h3 class="modal__title" id="vsbTitle">Place vessel in storage box</h3>' +
+        '<button type="button" data-vsb-close aria-label="Close">&times;</button>' +
+      '</div>' +
+      '<div class="modal__body">' +
+        '<label style="display:block;font-size:.78rem;color:#8e8e93;margin-bottom:10px">Storage box' +
+          '<select id="vsbBoxSelect" class="modal__input" style="margin-top:4px"></select>' +
+        '</label>' +
+        '<div id="vsbGrid" class="sb-grid sb-grid--round"></div>' +
+        '<div id="vsbWhere" style="font-size:.74rem;color:#8e8e93;margin-top:8px"></div>' +
+        '<div id="vsbHint" style="font-size:.72rem;color:#636366;margin-top:4px">Click an empty slot to place this vessel. Click its current slot to clear it.</div>' +
+      '</div>' +
+      '<div class="modal__footer" style="display:flex;gap:8px;align-items:center;padding:14px 16px">' +
+        '<button type="button" id="vsbRemove" class="btn">Remove from box</button>' +
+        '<span style="flex:1"></span>' +
+        '<button type="button" data-vsb-cancel class="btn">Cancel</button>' +
+        '<button type="button" id="vsbSave" class="btn btn--primary">Save</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(vesselStoreModal);
+  vesselStoreModal
+    .querySelectorAll("[data-vsb-close],[data-vsb-cancel]")
+    .forEach((el) => el.addEventListener("click", closeVesselStoreModal));
+  vesselStoreModal.addEventListener("click", (e) => {
+    if (e.target === vesselStoreModal) closeVesselStoreModal();
+  });
+  vesselStoreModal.querySelector("#vsbBoxSelect").addEventListener("change", (e) => {
+    vesselStoreBoxIndex = parseInt(e.target.value, 10);
+    if (Number.isNaN(vesselStoreBoxIndex)) vesselStoreBoxIndex = -1;
+    vesselStoreSlot = -1; // a fresh box → no chosen slot yet
+    renderVesselStoreGrid();
+  });
+  vesselStoreModal.querySelector("#vsbRemove").addEventListener("click", () =>
+    commitVesselStore({ remove: true })
+  );
+  vesselStoreModal.querySelector("#vsbSave").addEventListener("click", () =>
+    commitVesselStore({})
+  );
+}
+
+function openVesselStoreModal(node) {
+  loadStorageBoxes();
+  ensureVesselStoreModal();
+  vesselStoreNode = node;
+  const nodeId = node.dataset.nodeId || "";
+
+  // Current placement: prefer a live scan of the boxes (the source of truth),
+  // fall back to the node's remembered box id.
+  let curBoxIndex = -1;
+  let curSlot = -1;
+  for (let bi = 0; bi < storageBoxes.length && curBoxIndex < 0; bi++) {
+    const cells = storageBoxes[bi] && storageBoxes[bi].cells;
+    if (!Array.isArray(cells)) continue;
+    for (let ci = 0; ci < cells.length; ci++) {
+      const c = cells[ci];
+      if (c && c.kind === "vessel" && c.nodeId === nodeId) {
+        curBoxIndex = bi;
+        curSlot = ci;
+        break;
+      }
+    }
+  }
+  if (curBoxIndex < 0) {
+    const remembered = findBoxIndexById(node.dataset.cultureStorageBoxId || "");
+    if (remembered >= 0) curBoxIndex = remembered;
+  }
+
+  const sel = vesselStoreModal.querySelector("#vsbBoxSelect");
+  sel.innerHTML = "";
+  const optNone = document.createElement("option");
+  optNone.value = "-1";
+  optNone.textContent = storageBoxes.length ? "— choose a box —" : "No storage boxes yet";
+  sel.appendChild(optNone);
+  storageBoxes.forEach((box, i) => {
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent =
+      `${box.name || "Box " + (i + 1)} (${box.grid || "9x9"})` + (box.loc ? ` @ ${box.loc}` : "");
+    sel.appendChild(o);
+  });
+  vesselStoreBoxIndex = curBoxIndex;
+  vesselStoreSlot = curSlot;
+  sel.value = String(curBoxIndex);
+
+  const rec = vesselOccupantFromNode(node);
+  vesselStoreModal.querySelector("#vsbTitle").textContent = `Place “${rec.label}” in storage box`;
+  vesselStoreModal.querySelector("#vsbRemove").style.display = curSlot >= 0 ? "" : "none";
+
+  renderVesselStoreGrid();
+  vesselStoreModal.classList.remove("is-hidden");
+  vesselStoreModal.style.display = "flex";
+}
+
+function closeVesselStoreModal() {
+  if (!vesselStoreModal) return;
+  vesselStoreModal.classList.add("is-hidden");
+  vesselStoreModal.style.display = "none";
+  vesselStoreNode = null;
+}
+
+function renderVesselStoreGrid() {
+  if (!vesselStoreModal) return;
+  const wrap = vesselStoreModal.querySelector("#vsbGrid");
+  const whereEl = vesselStoreModal.querySelector("#vsbWhere");
+  wrap.innerHTML = "";
+  if (vesselStoreBoxIndex < 0 || vesselStoreBoxIndex >= storageBoxes.length) {
+    wrap.style.display = "none";
+    whereEl.textContent = storageBoxes.length
+      ? "Pick a storage box above."
+      : "Create a storage box first (Storage tab).";
+    return;
+  }
+  wrap.style.display = "grid";
+  const box = storageBoxes[vesselStoreBoxIndex];
+  const size = ensureBoxCells(box);
+  const total = size * size;
+  const nodeId = vesselStoreNode ? vesselStoreNode.dataset.nodeId || "" : "";
+  const myCode = vesselStoreNode ? vesselOccupantFromNode(vesselStoreNode).code : "";
+  wrap.style.setProperty("--sb-cols", size);
+  for (let i = 0; i < total; i++) {
+    const cell = box.cells[i];
+    const isThisVessel = cell && cell.kind === "vessel" && cell.nodeId === nodeId;
+    const isChosen = i === vesselStoreSlot;
+    const occupiedByOther = cell && !isThisVessel;
+    const c = document.createElement("div");
+    c.className = "sb-cell";
+    if (cell && cell.kind === "vessel") c.classList.add("sb-cell--vessel");
+    if (occupiedByOther) c.classList.add("sb-cell--occupied");
+    if (isChosen) c.classList.add("sb-cell--chosen");
+    const num = document.createElement("span");
+    num.className = "sb-cell__index";
+    num.textContent = cellLabel(i, size);
+    const content = document.createElement("span");
+    content.className = "sb-cell__content";
+    let text = "";
+    if (isChosen && !cell) text = myCode; // preview the vessel in an empty target
+    else if (cell)
+      text =
+        cell.kind === "vessel"
+          ? cell.code || (cell.name || "").slice(0, 3)
+          : (cell.name || "").slice(0, 3).toUpperCase();
+    content.textContent = text;
+    c.title = cell
+      ? cell.kind === "vessel"
+        ? cell.label || cell.name
+        : `${cell.name}${cell.lot ? " (" + cell.lot + ")" : ""}`
+      : "Empty";
+    c.addEventListener("click", () => {
+      if (isChosen) {
+        vesselStoreSlot = -1; // toggle off the chosen slot
+        renderVesselStoreGrid();
+        return;
+      }
+      if (occupiedByOther) {
+        showTaskToast("That slot is occupied — pick an empty one.");
+        return;
+      }
+      vesselStoreSlot = i;
+      renderVesselStoreGrid();
+    });
+    c.appendChild(num);
+    c.appendChild(content);
+    wrap.appendChild(c);
+  }
+  whereEl.textContent =
+    vesselStoreSlot >= 0
+      ? `Will place in ${box.name || "box"} · slot ${cellLabel(vesselStoreSlot, size)}.`
+      : "No slot chosen — Save will remove this vessel from storage.";
+}
+
+function commitVesselStore(opts) {
+  opts = opts || {};
+  if (!vesselStoreNode) {
+    closeVesselStoreModal();
+    return;
+  }
+  const node = vesselStoreNode;
+  const nodeId = node.dataset.nodeId || "";
+  removeVesselFromAllBoxes(nodeId); // a vessel occupies at most one slot
+  let placedWhere = "";
+  if (
+    !opts.remove &&
+    vesselStoreSlot >= 0 &&
+    vesselStoreBoxIndex >= 0 &&
+    vesselStoreBoxIndex < storageBoxes.length
+  ) {
+    const box = storageBoxes[vesselStoreBoxIndex];
+    const size = ensureBoxCells(box);
+    const boxId = ensureBoxId(box);
+    box.cells[vesselStoreSlot] = vesselOccupantFromNode(node);
+    node.dataset.cultureStorageBoxId = boxId;
+    node.dataset.cultureStorageSlot = String(vesselStoreSlot);
+    node.dataset.cultureStorageLoc = `${box.name || "Box"} · ${cellLabel(vesselStoreSlot, size)}`;
+    placedWhere = node.dataset.cultureStorageLoc;
+  } else {
+    delete node.dataset.cultureStorageBoxId;
+    delete node.dataset.cultureStorageSlot;
+    delete node.dataset.cultureStorageLoc;
+  }
+  persistStorageBoxes();
+  try {
+    if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+  } catch (e) {
+    /* ignore */
+  }
+  if (storageBoxViewIndex >= 0 && storageBoxViewIndex < storageBoxes.length) {
+    try {
+      viewStorageBox(storageBoxViewIndex);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  closeVesselStoreModal();
+  showTaskToast(placedWhere ? `Stored in ${placedWhere}` : "Removed from storage box");
+}
 // Create a Cell Culture vessel node from imported fields, laid out in a grid by
 // `index`, with no placement modal. Returns the new node id. The caller should
 // be on the cell-culture workspace (so the node is tagged + visible there).
@@ -11176,7 +11482,14 @@ function viewStorageBox(idx) {
     const content = document.createElement("span");
     content.className = "sb-cell__content";
     const filled = box.cells && box.cells[i];
-    content.textContent = filled ? (filled.name || "").slice(0, 3).toUpperCase() : "";
+    if (filled && filled.kind === "vessel") {
+      cell.classList.add("sb-cell--vessel");
+      content.textContent = filled.code || (filled.name || "").slice(0, 3);
+      cell.title = filled.label || filled.name || "Vessel";
+    } else {
+      content.textContent = filled ? (filled.name || "").slice(0, 3).toUpperCase() : "";
+      cell.title = filled ? `${filled.name}${filled.lot ? " (" + filled.lot + ")" : ""}` : "Empty";
+    }
     cell.appendChild(num);
     cell.appendChild(content);
     gridEl.appendChild(cell);

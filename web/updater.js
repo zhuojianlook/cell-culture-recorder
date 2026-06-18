@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.36", date: "2026-06-18", changes: [
+      "Cell Culture editor: a 'Store' button places a vessel into a real Storage Box slot (cryo / freezer location) — click an empty slot in the box grid to drop the vessel in, or its current slot to clear it",
+      "Storage boxes now show vessel occupants in cyan (distinct from reagent aliquots), with the vessel's full label on hover; the placement is remembered on the vessel and survives renames",
+    ] },
     { version: "0.2.35", date: "2026-06-18", changes: [
       "Cell Culture editor: a 'Protocol' button opens the full step-based protocol builder for the passage that produced the vessel (set a lineage parent first)",
     ] },

@@ -135,6 +135,7 @@
           '<button type="button" id="wlpcViewRecords" class="btn" title="Show this vessel in the Records table">View in Records</button>' +
           '<button type="button" id="wlpcMediaPlan" class="btn" title="Schedule media changes / feeds (dates, recurrence, volume) for this vessel">Media plan</button>' +
           '<button type="button" id="wlpcProtocol" class="btn" title="Define the protocol / SOP for the passage that produced this vessel">Protocol</button>' +
+          '<button type="button" id="wlpcStorage" class="btn" title="Place this vessel into a storage-box slot (cryo / freezer location)">Store</button>' +
           '<span style="flex:1"></span>' +
           '<button type="button" id="wlpcCancel" class="btn">Cancel</button>' +
           '<button type="button" id="wlpcSave" class="btn btn--primary">Save record</button>' +
@@ -157,6 +158,12 @@
       var node = current;
       save();
       if (typeof window.wlpOpenVesselProtocol === "function") window.wlpOpenVesselProtocol(node);
+    };
+    backdrop.querySelector("#wlpcStorage").onclick = function () {
+      if (!current) return;
+      var node = current;
+      save(); // persist the record first, then open the storage-box placer
+      if (typeof window.wlpPlaceVesselInBox === "function") window.wlpPlaceVesselInBox(node);
     };
     backdrop.querySelector("#wlpcEvAdd").onclick = recordEventFromForm;
     backdrop.addEventListener("click", function (e) { if (e.target === backdrop) hide(); });
