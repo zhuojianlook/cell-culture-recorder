@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.35", date: "2026-06-18", changes: [
+      "Cell Culture editor: a 'Protocol' button opens the full step-based protocol builder for the passage that produced the vessel (set a lineage parent first)",
+    ] },
     { version: "0.2.34", date: "2026-06-18", changes: [
       "Cell Culture editor: a 'Media plan' button opens the scheduler so you can specify media changes / feeds (dates, recurrence, volume) for a vessel — the same planner feature that was previously only reachable on non-culture nodes",
     ] },

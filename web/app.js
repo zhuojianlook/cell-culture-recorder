@@ -859,6 +859,24 @@ window.wlpSetWorkspace = function (id) { try { setActiveWorkspace(id); } catch (
 // Open the (shared) Media Plan scheduler for a vessel node — lets the culture
 // editor schedule media changes / feeds with dates, recurrence and volume.
 window.wlpShowMediaModal = function (node) { try { if (node) showMediaModal(node, "node"); } catch (e) { /* ignore */ } };
+// Open the protocol builder for the passage that produced this vessel (the
+// parent→vessel link) — that's where a passaging SOP belongs and it reuses the
+// full connection-based builder. P0/parentless vessels have no passage yet.
+window.wlpOpenVesselProtocol = function (node) {
+  try {
+    if (!node) return;
+    const childId = node.dataset.nodeId || "";
+    const parentId = node.dataset.cultureParentNodeId || "";
+    if (!parentId) {
+      showTaskToast("A protocol describes the passage that produced this vessel — set a lineage parent first.");
+      return;
+    }
+    let conn = connections.find((c) => c.toId === childId && c.fromId === parentId);
+    if (!conn) { ensureLineageConnection(parentId, childId); conn = connections.find((c) => c.toId === childId && c.fromId === parentId); }
+    if (conn) openProtocolBuilder(conn.id);
+    else showTaskToast("Couldn't find the passage link for this vessel.");
+  } catch (e) { /* ignore */ }
+};
 // Create a Cell Culture vessel node from imported fields, laid out in a grid by
 // `index`, with no placement modal. Returns the new node id. The caller should
 // be on the cell-culture workspace (so the node is tagged + visible there).
