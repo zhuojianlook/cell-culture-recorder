@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.38", date: "2026-06-18", changes: [
+      "Fix: drag-and-drop works again in the desktop app — you can drag icons from the palette onto the canvas to place vessels/nodes, drag to reposition them, and rearrange storage-box slots. The Tauri webview had been intercepting HTML5 drag-and-drop; that native interception is now disabled.",
+    ] },
     { version: "0.2.37", date: "2026-06-18", changes: [
       "Fix: recording reagent aliquots into a box that already held a stored vessel no longer overwrites the vessel — vessel occupants are now preserved and shown locked (cyan) in the aliquot grid",
       "Fix: deleting a vessel that was placed in a storage box now frees its slot instead of leaving an orphaned occupant",

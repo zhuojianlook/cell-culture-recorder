@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "WetLab Planner",
-  "version": "0.2.37",
+  "version": "0.2.38",
   "identifier": "com.zhuojian.cell-culture-recorder",
   "build": {
     "beforeDevCommand": "",
@@ -18,7 +18,8 @@
         "minWidth": 1024,
         "minHeight": 700,
         "backgroundColor": "#1c1c1e",
-        "theme": "Dark"
+        "theme": "Dark",
+        "dragDropEnabled": false
       }
     ],
     "security": {
