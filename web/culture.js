@@ -94,14 +94,14 @@
       '<div class="modal" style="margin-top:8vh;max-width:560px;width:560px">' +
         '<div class="modal__header" style="display:flex;align-items:center;justify-content:space-between">' +
           '<h3 style="margin:0">Culture record</h3>' +
-          '<span id="wlpcRecVessel" style="font-size:.8125rem;color:var(--muted,#828a94)"></span>' +
+          '<span id="wlpcRecVessel" style="font-size:.8125rem;color:var(--muted,#8e8e93)"></span>' +
         '</div>' +
         '<div class="modal__body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
           // Record type — the first, framing choice for every record.
           '<div class="field" style="grid-column:1/-1">' +
             '<label for="wlpcSourceType">Record type</label>' +
             provSelect("wlpcSourceType", LOGIC().SOURCE_RECORD_TYPES, LOGIC().sourceRecordLabel) +
-            '<div style="font-size:.72rem;color:#5b6268;margin-top:3px">Is this a piece of <strong>donor tissue</strong> (the raw source) or a <strong>culture vessel</strong> (a flask/dish/cell line)? Drives the source-conflict and ground-truth checks.</div>' +
+            '<div style="font-size:.72rem;color:#636366;margin-top:3px">Is this a piece of <strong>donor tissue</strong> (the raw source) or a <strong>culture vessel</strong> (a flask/dish/cell line)? Drives the source-conflict and ground-truth checks.</div>' +
           '</div>' +
           fieldText("wlpcDonor", "Donor / culture name") +
           fieldSelect("wlpcEye", "Eye", EYES) +
@@ -120,7 +120,7 @@
           // Events / passaging log
           '<div class="field" style="grid-column:1/-1">' +
             '<label>Events &amp; passaging</label>' +
-            '<div id="wlpcEventsList" style="max-height:130px;overflow:auto;border:1px solid rgba(130, 138, 148,.18);border-radius:8px;background:rgba(27, 31, 37,.35)"></div>' +
+            '<div id="wlpcEventsList" style="max-height:130px;overflow:auto;border:1px solid rgba(142, 142, 147,.18);border-radius:8px;background:rgba(20, 20, 22,.35)"></div>' +
             '<div style="display:flex;gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap">' +
               eventTypeSelect() +
               '<input type="date" id="wlpcEvDate" class="modal__input" style="width:auto">' +
@@ -129,7 +129,7 @@
               '<button type="button" id="wlpcEvAdd" class="btn">+ Record</button>' +
             '</div>' +
           '</div>' +
-          '<div id="wlpcErr" class="form-status" style="grid-column:1/-1;color:#ff7b7b"></div>' +
+          '<div id="wlpcErr" class="form-status" style="grid-column:1/-1;color:#ff6961"></div>' +
         '</div>' +
         '<div class="modal__footer" style="display:flex;gap:8px;align-items:center;padding:14px 16px">' +
           '<button type="button" id="wlpcViewRecords" class="btn" title="Show this vessel in the Records table">View in Records</button>' +
@@ -186,7 +186,7 @@
     var w = LOGIC().cultureWarnings(draftRecord(), allRecords());
     if (!w.length) { box.innerHTML = ""; box.style.display = "none"; return; }
     box.style.display = "";
-    box.style.color = "#ecbe7b";
+    box.style.color = "#ffd60a";
     box.innerHTML =
       '<div style="font-weight:600;margin-bottom:4px">&#9888; ' + w.length +
       (w.length === 1 ? " thing to check" : " things to check") + "</div>" +
@@ -210,7 +210,7 @@
     var events = LOGIC().sortEvents(LOGIC().parseEvents(node.dataset.cultureEvents));
     if (!events.length) {
       list.innerHTML =
-        '<div style="color:#5b6268;font-size:.78rem;padding:8px 10px">No events yet — record a passage, feed, freeze, etc.</div>';
+        '<div style="color:#636366;font-size:.78rem;padding:8px 10px">No events yet — record a passage, feed, freeze, etc.</div>';
       return;
     }
     list.innerHTML = events
@@ -218,9 +218,9 @@
         var detail = LOGIC().summarizeEvent(ev);
         var notes = ev.notes ? " — " + esc(ev.notes) : "";
         return (
-          '<div style="font-size:.78rem;padding:5px 10px;border-bottom:1px solid rgba(130, 138, 148,.08)">' +
-          '<span style="color:#51afef;font-weight:600">' + esc(String(ev.type).replace("_", " ")) + "</span> " +
-          '<span style="color:#828a94">' + esc(ev.at || "") + (detail ? " · " + esc(detail) : "") + "</span>" +
+          '<div style="font-size:.78rem;padding:5px 10px;border-bottom:1px solid rgba(142, 142, 147,.08)">' +
+          '<span style="color:#5a7fa8;font-weight:600">' + esc(String(ev.type).replace("_", " ")) + "</span> " +
+          '<span style="color:#8e8e93">' + esc(ev.at || "") + (detail ? " · " + esc(detail) : "") + "</span>" +
           esc(notes) +
           "</div>"
         );
@@ -300,16 +300,16 @@
   function provenanceSection() {
     var L = LOGIC();
     return (
-      '<details class="field" style="grid-column:1/-1;border:1px solid rgba(130, 138, 148,.18);' +
+      '<details class="field" style="grid-column:1/-1;border:1px solid rgba(142, 142, 147,.18);' +
         'border-radius:8px;padding:8px 10px">' +
-        '<summary style="cursor:pointer;color:#828a94;font-size:.82rem;user-select:none">' +
+        '<summary style="cursor:pointer;color:#8e8e93;font-size:.82rem;user-select:none">' +
           "Provenance &amp; source tracking</summary>" +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">' +
           '<div class="field"><label for="wlpcRawSource">Raw source identifier</label>' +
             '<input type="text" id="wlpcRawSource" class="modal__input" placeholder="tissue sample ID, notebook ref…"></div>' +
           '<div class="field"><label for="wlpcGroundTruth">Ground-truth date</label>' +
             provSelect("wlpcGroundTruth", L.GROUND_TRUTH_DATE_FIELDS, L.groundTruthLabel) +
-            '<div style="font-size:.68rem;color:#5b6268;margin-top:3px">Which date is authoritative for age &amp; lineage sorting.</div></div>' +
+            '<div style="font-size:.68rem;color:#636366;margin-top:3px">Which date is authoritative for age &amp; lineage sorting.</div></div>' +
           '<div class="field"><label for="wlpcDissocDate">Dissociation date</label>' +
             '<input type="date" id="wlpcDissocDate" class="modal__input"></div>' +
           '<div class="field"><label for="wlpcPretreatDate">Pretreatment date</label>' +
@@ -450,7 +450,7 @@
   // Status → a small colour for pills/badges/grid/tree (shared so all surfaces
   // agree). Green = healthy/active; cyan = frozen; red = contaminated; grey = discarded.
   function statusColor(s) {
-    return { active: "#98be65", frozen: "#46d9ff", contaminated: "#ff6c6b", discarded: "#828a94" }[s] || "#828a94";
+    return { active: "#63a66a", frozen: "#64d2ff", contaminated: "#ff453a", discarded: "#8e8e93" }[s] || "#8e8e93";
   }
 
   // ─── Map integration: per-node status + warning badges ────────────────────
@@ -474,10 +474,10 @@
         n.appendChild(badge);
       }
       var dot = '<span title="' + esc(status) + '" style="width:9px;height:9px;border-radius:50%;background:' +
-        statusColor(status) + ';border:1.5px solid #21242b;box-sizing:content-box"></span>';
+        statusColor(status) + ';border:1.5px solid #2c2c2e;box-sizing:content-box"></span>';
       var warn = warns
         ? '<span title="' + warns + (warns === 1 ? " thing" : " things") + ' to check" ' +
-          'style="background:#ff6c6b;color:#21242b;font:600 9px/1 system-ui;border-radius:8px;padding:2px 4px;border:1.5px solid #21242b">&#9888; ' + warns + "</span>"
+          'style="background:#ff453a;color:#2c2c2e;font:600 9px/1 system-ui;border-radius:8px;padding:2px 4px;border:1.5px solid #2c2c2e">&#9888; ' + warns + "</span>"
         : "";
       badge.innerHTML = dot + warn;
     });
@@ -501,7 +501,7 @@
     if (!tr) return;
     try { tr.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) { tr.scrollIntoView(); }
     tr.style.transition = "background .3s";
-    tr.style.background = "rgba(81, 175, 239,.25)";
+    tr.style.background = "rgba(90, 127, 168,.25)";
     setTimeout(function () { if (tr) tr.style.background = ""; }, 1500);
   }
 
@@ -887,14 +887,14 @@
       var warnN = LOGIC().cultureWarnings(r, records).length;
       var dot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
         statusColor(r.status || "active") + ';margin-right:8px"></span>';
-      var connector = item.depth > 0 ? '<span style="color:#454a52">&#9492;&#9472; </span>' : "";
+      var connector = item.depth > 0 ? '<span style="color:#48484a">&#9492;&#9472; </span>' : "";
       var meta = (r.passage !== "" && r.passage != null ? "P" + r.passage + " · " : "") +
         esc(LOGIC().vesselTypeFromIcon(r.iconId)) + " · " + esc(r.status || "active");
       var warn = warnN ? ' <span class="wlpc-warn">&#9888; ' + warnN + "</span>" : "";
       html +=
         '<div class="wlpc-tree-row" data-node-id="' + esc(r.nodeId) + '" style="padding-left:' + indent + 'px">' +
         connector + dot + "<strong>" + esc(recordName(r)) + "</strong> " +
-        '<span style="color:#828a94">' + meta + "</span>" + warn + "</div>";
+        '<span style="color:#8e8e93">' + meta + "</span>" + warn + "</div>";
     });
     body.innerHTML = html;
     Array.prototype.forEach.call(body.querySelectorAll("div[data-node-id]"), wireRowClick);

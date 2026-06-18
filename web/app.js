@@ -484,11 +484,11 @@ const PLATE_GROUP_COLORS = [
   "#60a5fa",
   "#84cc16",
   "#f97316",
-  "#4a9fd8"
+  "#5a7fa8"
 ];
 const MILESTONE_COLORS = [
   "#f472b6",
-  "#ff6c6b",
+  "#ff453a",
   "#f59e0b",
   "#22d3ee",
   "#60a5fa",
@@ -958,12 +958,12 @@ function initNewProjectModal() {
     <div class="modal" style="margin-top:18vh">
       <div class="modal__header"><h3 style="margin:0">New Project</h3></div>
       <div class="modal__body">
-        <label style="display:block;margin-bottom:6px;font-size:0.8125rem;color:var(--muted,#828a94)">Project name</label>
+        <label style="display:block;margin-bottom:6px;font-size:0.8125rem;color:var(--muted,#8e8e93)">Project name</label>
         <input type="text" class="modal__input" placeholder="My Project" maxlength="120">
-        <label style="display:block;margin-bottom:6px;margin-top:14px;font-size:0.8125rem;color:var(--muted,#828a94)">Lab <span style="font-weight:400;opacity:0.7">(optional — projects in the same lab share resources)</span></label>
+        <label style="display:block;margin-bottom:6px;margin-top:14px;font-size:0.8125rem;color:var(--muted,#8e8e93)">Lab <span style="font-weight:400;opacity:0.7">(optional — projects in the same lab share resources)</span></label>
         <input type="text" class="modal__input modal__lab-input" placeholder="e.g. Smith Lab" maxlength="80" list="newProjectLabList">
         <datalist id="newProjectLabList"></datalist>
-        <p class="modal__error" style="color:#ff7b7b;font-size:0.8125rem;margin:8px 0 0;min-height:1em"></p>
+        <p class="modal__error" style="color:#ff6961;font-size:0.8125rem;margin:8px 0 0;min-height:1em"></p>
       </div>
       <div class="modal__footer">
         <button type="button" class="modal__cancel">Cancel</button>
@@ -1053,8 +1053,8 @@ function initDeleteProjectModal() {
     <div class="modal" style="margin-top:18vh">
       <div class="modal__header"><h3 style="margin:0">Delete Project</h3></div>
       <div class="modal__body">
-        <p style="margin:0 0 8px;font-size:0.875rem;color:var(--fg,#bbc2cf)">Are you sure you want to delete <strong class="modal__project-name"></strong>?</p>
-        <p style="margin:0;font-size:0.8125rem;color:#ff7b7b">This cannot be undone.</p>
+        <p style="margin:0 0 8px;font-size:0.875rem;color:var(--fg,#e5e5ea)">Are you sure you want to delete <strong class="modal__project-name"></strong>?</p>
+        <p style="margin:0;font-size:0.8125rem;color:#ff6961">This cannot be undone.</p>
       </div>
       <div class="modal__footer">
         <button type="button" class="modal__cancel">Cancel</button>
@@ -1115,7 +1115,7 @@ function initShareProjectModal() {
     <div class="modal" style="max-width:520px;margin-top:12vh">
       <div class="modal__header" style="display:flex;align-items:center;justify-content:space-between">
         <h3 style="margin:0">Share Project</h3>
-        <button type="button" class="share-modal__close" aria-label="Close" style="background:none;border:none;color:var(--muted,#828a94);font-size:1.25rem;cursor:pointer;padding:4px">&times;</button>
+        <button type="button" class="share-modal__close" aria-label="Close" style="background:none;border:none;color:var(--muted,#8e8e93);font-size:1.25rem;cursor:pointer;padding:4px">&times;</button>
       </div>
       <div class="modal__body">
         <div class="share-form">
@@ -1126,7 +1126,7 @@ function initShareProjectModal() {
           </select>
           <button type="button" class="btn btn--accent share-form__add">Add</button>
         </div>
-        <p class="share-form__error" style="color:#ff7b7b;font-size:0.8125rem;margin:6px 0 0;min-height:1em"></p>
+        <p class="share-form__error" style="color:#ff6961;font-size:0.8125rem;margin:6px 0 0;min-height:1em"></p>
         <div class="share-list" style="margin-top:16px;max-height:260px;overflow-y:auto"></div>
       </div>
     </div>`;
@@ -1144,7 +1144,7 @@ function initShareProjectModal() {
     listEl.innerHTML = '<p style="color:var(--muted);font-size:0.8125rem">Loading...</p>';
     try {
       const res = await apiFetch(`/api/canvases/${encodeURIComponent(currentCanvasIdForShare)}/shares`);
-      if (!res.ok) { listEl.innerHTML = '<p style="color:#ff7b7b;font-size:0.8125rem">Failed to load shares.</p>'; return; }
+      if (!res.ok) { listEl.innerHTML = '<p style="color:#ff6961;font-size:0.8125rem">Failed to load shares.</p>'; return; }
       const shares = res.data?.shares || [];
       if (shares.length === 0) {
         listEl.innerHTML = '<p style="color:var(--muted);font-size:0.8125rem">No members yet.</p>';
@@ -1178,7 +1178,7 @@ function initShareProjectModal() {
         });
       });
     } catch {
-      listEl.innerHTML = '<p style="color:#ff7b7b;font-size:0.8125rem">Network error.</p>';
+      listEl.innerHTML = '<p style="color:#ff6961;font-size:0.8125rem">Network error.</p>';
     }
   }
 
@@ -1303,13 +1303,13 @@ async function renderAdminTab(contentEl) {
       case "audit": await renderAdminAudit(contentEl); break;
     }
   } catch {
-    contentEl.innerHTML = '<p style="color:#ff7b7b;padding:24px;text-align:center">Failed to load data.</p>';
+    contentEl.innerHTML = '<p style="color:#ff6961;padding:24px;text-align:center">Failed to load data.</p>';
   }
 }
 
 async function renderAdminUsers(el) {
   const res = await apiFetch("/api/admin/users?limit=200");
-  if (!res.ok) { el.innerHTML = '<p style="color:#ff7b7b">Error loading users.</p>'; return; }
+  if (!res.ok) { el.innerHTML = '<p style="color:#ff6961">Error loading users.</p>'; return; }
   const users = res.data?.users || [];
   el.innerHTML = `
     <div class="admin-section">
@@ -1361,7 +1361,7 @@ async function renderAdminUsers(el) {
 
 async function renderAdminLabs(el) {
   const res = await apiFetch("/api/admin/labs");
-  if (!res.ok) { el.innerHTML = '<p style="color:#ff7b7b">Error loading labs.</p>'; return; }
+  if (!res.ok) { el.innerHTML = '<p style="color:#ff6961">Error loading labs.</p>'; return; }
   const labs = res.data?.labs || [];
   el.innerHTML = `
     <div class="admin-section">
@@ -1410,7 +1410,7 @@ async function renderAdminLabs(el) {
 
 async function renderAdminProjects(el) {
   const res = await apiFetch("/api/admin/projects?limit=200");
-  if (!res.ok) { el.innerHTML = '<p style="color:#ff7b7b">Error loading projects.</p>'; return; }
+  if (!res.ok) { el.innerHTML = '<p style="color:#ff6961">Error loading projects.</p>'; return; }
   const projects = res.data?.projects || [];
   el.innerHTML = `
     <div class="admin-section">
@@ -1437,7 +1437,7 @@ async function renderAdminProjects(el) {
 
 async function renderAdminAnalytics(el) {
   const res = await apiFetch("/api/admin/stats");
-  if (!res.ok) { el.innerHTML = '<p style="color:#ff7b7b">Error loading stats.</p>'; return; }
+  if (!res.ok) { el.innerHTML = '<p style="color:#ff6961">Error loading stats.</p>'; return; }
   const s = res.data || {};
   el.innerHTML = `
     <div class="admin-stats-grid">
@@ -1462,7 +1462,7 @@ async function renderAdminAnalytics(el) {
 
 async function renderAdminAudit(el) {
   const res = await apiFetch("/api/admin/audit?limit=100");
-  if (!res.ok) { el.innerHTML = '<p style="color:#ff7b7b">Error loading audit log.</p>'; return; }
+  if (!res.ok) { el.innerHTML = '<p style="color:#ff6961">Error loading audit log.</p>'; return; }
   const events = res.data?.events || [];
   if (events.length === 0) {
     el.innerHTML = '<p style="color:var(--muted);padding:24px;text-align:center">No audit events yet.</p>';
@@ -1498,7 +1498,7 @@ async function renderDashboard() {
 
   try {
     const result = await apiFetch("/api/canvases");
-    if (!result.ok) { grid.innerHTML = '<p style="color:#ff7b7b">Failed to load projects.</p>'; return; }
+    if (!result.ok) { grid.innerHTML = '<p style="color:#ff6961">Failed to load projects.</p>'; return; }
     const canvases = (result.data?.canvases || result.data || []);
     dashboardCanvasList = canvases;
 
@@ -1514,7 +1514,7 @@ async function renderDashboard() {
 
     if (owned.length === 0) {
       const msg = document.createElement("p");
-      msg.style.cssText = "grid-column:1/-1;color:var(--muted,#828a94);font-size:0.8125rem";
+      msg.style.cssText = "grid-column:1/-1;color:var(--muted,#8e8e93);font-size:0.8125rem";
       msg.textContent = "No projects yet. Create one to get started!";
       grid.appendChild(msg);
     } else {
@@ -1528,14 +1528,14 @@ async function renderDashboard() {
 
     if (shared.length === 0) {
       const msg = document.createElement("p");
-      msg.style.cssText = "grid-column:1/-1;color:var(--muted,#828a94);font-size:0.8125rem";
+      msg.style.cssText = "grid-column:1/-1;color:var(--muted,#8e8e93);font-size:0.8125rem";
       msg.textContent = "None yet.";
       grid.appendChild(msg);
     } else {
       renderProjectCards(grid, shared);
     }
   } catch {
-    grid.innerHTML = '<p style="color:#ff7b7b">Network error loading projects.</p>';
+    grid.innerHTML = '<p style="color:#ff6961">Network error loading projects.</p>';
   }
 }
 
@@ -3933,12 +3933,12 @@ const ARROW_TAIL_VECTOR_MIN = 6;
 const ARROW_TAIL_SEGMENT_MIN = 16;
 const ARROW_TAIL_SEGMENT_MAX = 28;
 const PLANNING_DEPENDENCY_COLORS = [
-  "#51afef",
+  "#5a7fa8",
   "#f59e0b",
   "#60a5fa",
   "#f472b6",
   "#34d399",
-  "#ff6c6b",
+  "#ff453a",
   "#a78bfa",
   "#22d3ee",
   "#fb7185",
@@ -4153,7 +4153,7 @@ function initAuthGate() {
   function setGateStatus(msg, tone) {
     if (!statusEl) return;
     statusEl.textContent = msg;
-    statusEl.style.color = tone === "error" ? "#ff7b7b" : tone === "success" ? "#bbf7d0" : "";
+    statusEl.style.color = tone === "error" ? "#ff6961" : tone === "success" ? "#bbf7d0" : "";
   }
 
   if (localBtn) {
@@ -5821,7 +5821,7 @@ window.wlpTidyCultureTimeline = function () {
 // ── Tidy-timeline lane bands + vessel cards (Option A visuals) ──────────────
 // (cultureLanes is declared near the top with other module state to avoid a TDZ
 // when updateTimelineLayout runs during early init.)
-const CULTURE_LANE_PALETTE = ["#51afef", "#98be65", "#ECBE7B", "#46D9FF", "#c678dd", "#ff6c6b"];
+const CULTURE_LANE_PALETTE = ["#5a7fa8", "#63a66a", "#ffd60a", "#64d2ff", "#bf5af2", "#ff453a"];
 function cultureLaneAccent(donor) {
   const s = String(donor || "");
   let h = 0;
@@ -8963,7 +8963,7 @@ function setSignInStatus(message, tone = "") {
   if (tone === "success") {
     signInStatus.style.color = "#bbf7d0";
   } else if (tone === "error") {
-    signInStatus.style.color = "#ff7b7b";
+    signInStatus.style.color = "#ff6961";
   } else {
     signInStatus.style.color = "";
   }
@@ -9115,7 +9115,7 @@ function renderBillingStatusText(info) {
   if (!billingStatusEl) return;
   if (!info) {
     billingStatusEl.textContent = "Billing status unavailable.";
-    billingStatusEl.style.color = "#ff7b7b";
+    billingStatusEl.style.color = "#ff6961";
     return;
   }
   const configured = !!info.configuredCheckout;
@@ -9546,7 +9546,7 @@ function saveCompletionModal() {
   if (!user) {
     if (signInStatus) {
       signInStatus.textContent = "Select a user to complete the task.";
-      signInStatus.style.color = "#ff7b7b";
+      signInStatus.style.color = "#ff6961";
     }
     return;
   }
@@ -10907,7 +10907,7 @@ function initStorageBoxModal() {
           <label>Notes<input id="sbNotes" type="text" placeholder="e.g., cells batch 3"></label>
           <label class="sb-share-lab-label" style="display:flex;align-items:center;gap:8px;grid-column:1/-1;margin-top:4px;">
             <input id="sbShareLab" type="checkbox" style="width:auto;margin:0;">
-            <span style="font-size:0.8125rem;color:var(--muted,#828a94)">Share with lab</span>
+            <span style="font-size:0.8125rem;color:var(--muted,#8e8e93)">Share with lab</span>
           </label>
         </div>
         <div class="modal__footer" style="justify-content:flex-start;padding:6px 0 0;">
@@ -12195,7 +12195,7 @@ function normalizePlateGroupColor(color) {
 
 function hexToRgba(hex, alpha = 1) {
   const normalized = normalizePlateGroupColor(hex);
-  if (!normalized) return `rgba(81, 175, 239, ${alpha})`;
+  if (!normalized) return `rgba(90, 127, 168, ${alpha})`;
   const r = parseInt(normalized.slice(1, 3), 16);
   const g = parseInt(normalized.slice(3, 5), 16);
   const b = parseInt(normalized.slice(5, 7), 16);
@@ -13906,7 +13906,7 @@ let mediaStatusTimeout = null;
 function showMediaStatus(message, tone = "error") {
   if (!mediaForm?.status) return;
   mediaForm.status.textContent = message;
-  mediaForm.status.style.color = tone === "success" ? "#bbf7d0" : "#ff7b7b";
+  mediaForm.status.style.color = tone === "success" ? "#bbf7d0" : "#ff6961";
   if (mediaStatusTimeout) clearTimeout(mediaStatusTimeout);
   mediaStatusTimeout = setTimeout(() => {
     mediaForm.status.textContent = "";
@@ -14341,7 +14341,7 @@ function saveUser() {
 function showUserStatus(msg, tone = "error") {
   if (!userForm.status) return;
   userForm.status.textContent = msg;
-  userForm.status.style.color = tone === "success" ? "#bbf7d0" : "#ff7b7b";
+  userForm.status.style.color = tone === "success" ? "#bbf7d0" : "#ff6961";
 }
 function renderMediaTimeline() {
   const container = mediaForm?.timeline;
@@ -14530,7 +14530,7 @@ function renderMediaTimeline() {
     const baseY = spineY + additiveOffset;
     const tri = document.createElementNS(svgNS, "polygon");
     tri.setAttribute("points", `${x - 6},${baseY} ${x + 6},${baseY} ${x},${baseY - 14}`);
-    tri.setAttribute("fill", "#ff6c6b");
+    tri.setAttribute("fill", "#ff453a");
     const allDone = group.every((g) => modalTaskStatus[addKey(g.idx)]);
     if (allDone) tri.classList.add("is-done");
     svg.appendChild(tri);
