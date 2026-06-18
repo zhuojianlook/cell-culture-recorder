@@ -6556,6 +6556,15 @@ function handleDeleteSelection() {
         .forEach((child) => { delete child.dataset.cultureParentNodeId; });
     } catch { /* */ }
     selection.el.remove();
+    // Cell-culture vessel: if this node occupied a storage-box slot, free the
+    // slot so we don't leave an orphaned occupant pointing at a deleted node
+    // (the box view is read-only, so there'd be no other way to clear it).
+    try {
+      if (typeof removeVesselFromAllBoxes === "function" && removeVesselFromAllBoxes(selection.id)) {
+        persistStorageBoxes();
+        if (storageBoxViewIndex >= 0 && storageBoxViewIndex < storageBoxes.length) viewStorageBox(storageBoxViewIndex);
+      }
+    } catch { /* */ }
     toggleHint();
     updateAllConnections();
     renderPlanningTaskPanel();
@@ -11319,7 +11328,37 @@ function saveStorageBox() {
   };
   loadStorageBoxes();
   if (editingStorageBoxIndex >= 0 && editingStorageBoxIndex < storageBoxes.length) {
-    storageBoxes[editingStorageBoxIndex] = { ...storageBoxes[editingStorageBoxIndex], ...payload };
+    const existing = storageBoxes[editingStorageBoxIndex];
+    // Shrinking the grid would later truncate box.cells (ensureBoxCells) and
+    // silently drop any occupant in an out-of-range slot. Confirm first, and
+    // free any dropped vessel's node back-reference so it doesn't dangle.
+    const newTotal = parseGridSize(grid) * parseGridSize(grid);
+    if (Array.isArray(existing.cells) && existing.cells.length > newTotal) {
+      const dropped = existing.cells.slice(newTotal).filter(Boolean);
+      if (dropped.length) {
+        const vesselCount = dropped.filter((c) => c && c.kind === "vessel").length;
+        const msg =
+          `Shrinking this box drops ${dropped.length} occupied slot(s)` +
+          (vesselCount ? ` (including ${vesselCount} stored vessel${vesselCount > 1 ? "s" : ""})` : "") +
+          `. Continue?`;
+        if (!confirm(msg)) return;
+        let clearedNode = false;
+        dropped.forEach((c) => {
+          if (c && c.kind === "vessel" && c.nodeId) {
+            const n = canvas.querySelector('.drop[data-node-id="' + c.nodeId + '"]');
+            if (n) {
+              delete n.dataset.cultureStorageBoxId;
+              delete n.dataset.cultureStorageSlot;
+              delete n.dataset.cultureStorageLoc;
+              clearedNode = true;
+            }
+          }
+        });
+        existing.cells = existing.cells.slice(0, newTotal);
+        if (clearedNode && typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+      }
+    }
+    storageBoxes[editingStorageBoxIndex] = { ...existing, ...payload };
   } else {
     storageBoxes.push(payload);
   }
@@ -11423,7 +11462,7 @@ function refreshStorageSelect() {
 
 function tweakGrid(delta) {
   const current = storageBoxForm.gridDisplay.textContent || "9x9";
-  const match = current.match(/(\\d+)x(\\d+)/);
+  const match = current.match(/(\d+)x(\d+)/);
   let rows = 9, cols = 9;
   if (match) {
     rows = parseInt(match[1], 10);
@@ -11469,7 +11508,7 @@ function viewStorageBox(idx) {
   const title = storageBoxViewModal.querySelector("#sbViewTitle");
   const gridEl = storageBoxViewModal.querySelector("#sbViewGrid");
   title.textContent = `${box.name} (${box.grid || "9x9"}) @ ${box.loc || "No location"}`;
-  const match = (box.grid || "9x9").match(/(\\d+)x(\\d+)/);
+  const match = (box.grid || "9x9").match(/(\d+)x(\d+)/);
   const size = match ? Math.max(1, Math.min(20, parseInt(match[1], 10))) : 9;
   gridEl.innerHTML = "";
   gridEl.style.setProperty("--sb-cols", size);
@@ -11696,7 +11735,7 @@ function ensureBoxCells(box) {
 }
 
 function parseGridSize(gridStr) {
-  const match = (gridStr || "").match(/(\\d+)x(\\d+)/);
+  const match = (gridStr || "").match(/(\d+)x(\d+)/);
   const n = match ? parseInt(match[1], 10) : 9;
   return Math.max(1, Math.min(20, n));
 }
@@ -11768,7 +11807,9 @@ function renderAliquotBoxGrid() {
     const c = document.createElement("div");
     c.className = "sb-cell sb-cell--mini";
     c.dataset.index = idx;
-    const isDraggable = !!cell;
+    // A vessel occupant is locked in the aliquot grid — it can't be dragged or
+    // overwritten here; it's only managed from the vessel's Store dialog.
+    const isDraggable = !!cell && cell.kind !== "vessel";
     c.draggable = isDraggable;
     c.setAttribute("draggable", isDraggable ? "true" : "false");
     const num = document.createElement("span");
@@ -11776,8 +11817,18 @@ function renderAliquotBoxGrid() {
     num.textContent = cellLabel(idx, size);
     const content = document.createElement("span");
     content.className = "sb-cell__content";
-    content.textContent = cell ? cell.name.slice(0, 3).toUpperCase() : "";
-    c.title = cell ? `${cell.name} (${cell.lot || ""})` : "Empty";
+    const isVesselCell = !!cell && cell.kind === "vessel";
+    content.textContent = cell
+      ? isVesselCell
+        ? cell.code || (cell.name || "").slice(0, 3)
+        : cell.name.slice(0, 3).toUpperCase()
+      : "";
+    c.title = cell
+      ? isVesselCell
+        ? `Vessel: ${cell.label || cell.name} (managed from the vessel's Store dialog)`
+        : `${cell.name} (${cell.lot || ""})`
+      : "Empty";
+    if (isVesselCell) c.classList.add("sb-cell--vessel", "sb-cell--occupied");
     if (cell && cell.preview) c.classList.add("sb-cell--preview");
     c.addEventListener("dragstart", (e) => {
       if (!cell) {
@@ -11810,6 +11861,9 @@ function renderAliquotBoxGrid() {
       const from = fromData ? parseInt(fromData, 10) : currentAliquotDragFrom;
       const to = idx;
       if (Number.isNaN(from) || Number.isNaN(to) || from === to) return;
+      // A vessel occupant is immovable here — never let a swap pick it up or
+      // land on it (that would relocate/clobber the vessel↔box link).
+      if (aliquotPlacement[from]?.kind === "vessel" || aliquotPlacement[to]?.kind === "vessel") return;
       const tmp = aliquotPlacement[from];
       aliquotPlacement[from] = aliquotPlacement[to];
       aliquotPlacement[to] = tmp;
@@ -11829,8 +11883,12 @@ function placeAliquotsInBox(boxIdx, name, lot, count, vol) {
   const box = storageBoxes[boxIdx];
   const size = ensureBoxCells(box);
   if (aliquotPlacement && aliquotPlacementBox === boxIdx) {
-    // commit the current placement, converting previews to real
-    box.cells = aliquotPlacement.map((c) => (c ? { name: c.name, lot: c.lot, vol: c.vol } : null));
+    // commit the current placement, converting previews to real — but NEVER
+    // flatten a vessel occupant (kind:"vessel") into a bare aliquot, or its
+    // nodeId/label back-reference to the vessel node would be destroyed.
+    box.cells = aliquotPlacement.map((c) =>
+      c ? (c.kind === "vessel" ? c : { name: c.name, lot: c.lot, vol: c.vol }) : null
+    );
   } else {
     let remaining = count;
     for (let i = 0; i < box.cells.length && remaining > 0; i++) {

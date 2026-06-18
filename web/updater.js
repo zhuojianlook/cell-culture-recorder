@@ -33,6 +33,12 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.37", date: "2026-06-18", changes: [
+      "Fix: recording reagent aliquots into a box that already held a stored vessel no longer overwrites the vessel — vessel occupants are now preserved and shown locked (cyan) in the aliquot grid",
+      "Fix: deleting a vessel that was placed in a storage box now frees its slot instead of leaving an orphaned occupant",
+      "Fix: storage-box grid sizes other than 9×9 now work everywhere (the size parser was matching nothing, so every box was forced to 9×9)",
+      "Safer box editing: shrinking a box's grid now warns before dropping any occupied slots and cleans up affected vessel links",
+    ] },
     { version: "0.2.36", date: "2026-06-18", changes: [
       "Cell Culture editor: a 'Store' button places a vessel into a real Storage Box slot (cryo / freezer location) — click an empty slot in the box grid to drop the vessel in, or its current slot to clear it",
       "Storage boxes now show vessel occupants in cyan (distinct from reagent aliquots), with the vessel's full label on hover; the placement is remembered on the vessel and survives renames",
