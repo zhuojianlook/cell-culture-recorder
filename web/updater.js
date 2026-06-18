@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.34", date: "2026-06-18", changes: [
+      "Cell Culture editor: a 'Media plan' button opens the scheduler so you can specify media changes / feeds (dates, recurrence, volume) for a vessel — the same planner feature that was previously only reachable on non-culture nodes",
+    ] },
     { version: "0.2.33", date: "2026-06-17", changes: [
       "App-wide restyle to match the Multi-Panel Figure Builder: Apple-dark palette (steel-blue accent, #1c1c1e background), system font, and flat surfaces (no gradients or blur)",
     ] },

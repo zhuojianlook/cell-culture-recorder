@@ -856,6 +856,9 @@ window.wlpFocusNode = function (nodeId) {
 };
 window.wlpActiveWorkspace = function () { return activeWorkspaceId; };
 window.wlpSetWorkspace = function (id) { try { setActiveWorkspace(id); } catch (e) { /* ignore */ } };
+// Open the (shared) Media Plan scheduler for a vessel node — lets the culture
+// editor schedule media changes / feeds with dates, recurrence and volume.
+window.wlpShowMediaModal = function (node) { try { if (node) showMediaModal(node, "node"); } catch (e) { /* ignore */ } };
 // Create a Cell Culture vessel node from imported fields, laid out in a grid by
 // `index`, with no placement modal. Returns the new node id. The caller should
 // be on the cell-culture workspace (so the node is tagged + visible there).
