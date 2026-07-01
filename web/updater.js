@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.42", date: "2026-07-01", changes: [
+      "Cell Culture Records → Timeline is much cleaner: passages are now banded top-to-bottom (P0, P1, P2 …) with time running left-to-right, so a lineage reads straight down the page instead of tangling across lanes.",
+      "Vessels that share the same passage AND the same seed date are collapsed into a single node with a ×N badge. This surfaces the 'split or duplicate' case directly — N flasks split from one parent on the same day, or N repeated log entries — instead of stacking N identical symbols on top of each other.",
+    ] },
     { version: "0.2.41", date: "2026-06-18", changes: [
       "Cell Culture Records → Timeline: the lineage view is now a real timeline. Each donor·eye is a compact date axis; every vessel is drawn as its vessel-type symbol tinted by status, placed at its seed date and joined to its parent by a lineage curve. Click a symbol to open its record.",
       "Uncertain ('?' best-guess) donor entries now keep that marker — they still reconcile to the right donor for grouping and lineage, but are flagged so you can see which identifications were a guess.",

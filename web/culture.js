@@ -949,69 +949,95 @@
 
   // Render one donor·eye group's vessels as an SVG date-axis timeline.
   function groupTimelineSvg(vessels, flags, all) {
-    var W = 1000, LEFT = 100, RIGHT = 968, TOP = 34, LANE = 68, NR = 17;
+    var GUT = 42, LEFT = 100, RIGHT = 968, TOP = 22, SUBH = 54, NR = 15, MINGAP = NR * 2 + 24;
     var msOf = function (s) { var t = Date.parse(s); return isNaN(t) ? NaN : t; };
-    vessels.forEach(function (v) { v._ms = msOf(v.seedDate); });
-    var dated = vessels.filter(function (v) { return !isNaN(v._ms); });
-    var minMs = dated.length ? Math.min.apply(null, dated.map(function (v) { return v._ms; })) : 0;
-    var maxMs = dated.length ? Math.max.apply(null, dated.map(function (v) { return v._ms; })) : 0;
-    function xOf(v) {
-      if (isNaN(v._ms)) return 52;                        // undated vessels: a zone left of the axis
-      if (maxMs === minMs) return (LEFT + RIGHT) / 2;
-      return LEFT + (v._ms - minMs) / (maxMs - minMs) * (RIGHT - LEFT);
-    }
-    vessels.sort(function (a, b) { return (xOf(a) - xOf(b)) || ((Number(a.passage) || 0) - (Number(b.passage) || 0)); });
-    var laneLastX = [];
-    vessels.forEach(function (v) {
-      var x = xOf(v), lane = 0;
-      for (; lane < laneLastX.length; lane++) { if (laneLastX[lane] <= x - (NR * 2 + 12)) break; }
-      laneLastX[lane] = x; v._x = x; v._y = TOP + lane * LANE;
-    });
-    var H = TOP + Math.max(1, laneLastX.length) * LANE - 6;
+    function pnum(v) { var n = Number(v.passage); return (v.passage !== "" && v.passage != null && !isNaN(n)) ? n : null; }
 
-    var byId = {}; vessels.forEach(function (v) { byId[v.nodeId] = v; });
-    var edges = "";
+    // Collapse vessels that share the same passage AND seed date into ONE node —
+    // these are the "split or duplicate" siblings, shown once with a ×N badge
+    // instead of N stacked symbols. Lineage links map to the collapsed node.
+    var clusters = [], byKey = {}, clOf = {};
     vessels.forEach(function (v) {
-      var p = v.parentNodeId && byId[v.parentNodeId];
-      if (!p) return;
-      var mx = (p._x + v._x) / 2;
-      edges += '<path class="wlpc-tl-edge" d="M' + p._x.toFixed(1) + " " + p._y + " C" + mx.toFixed(1) + " " + p._y + " " + mx.toFixed(1) + " " + v._y + " " + v._x.toFixed(1) + " " + v._y + '"/>';
+      var pk = (pnum(v) === null ? "?" : pnum(v));
+      var key = pk + "||" + String(v.seedDate || "");
+      var c = byKey[key];
+      if (!c) { c = byKey[key] = { pk: pk, seed: v.seedDate, ms: msOf(v.seedDate), members: [], rep: v, id: clusters.length }; clusters.push(c); }
+      c.members.push(v);
+      clOf[v.nodeId] = c;
+    });
+
+    var datedC = clusters.filter(function (c) { return !isNaN(c.ms); });
+    var minMs = datedC.length ? Math.min.apply(null, datedC.map(function (c) { return c.ms; })) : 0;
+    var maxMs = datedC.length ? Math.max.apply(null, datedC.map(function (c) { return c.ms; })) : 0;
+    function baseX(c) { if (isNaN(c.ms)) return LEFT; if (maxMs === minMs) return (LEFT + RIGHT) / 2; return LEFT + (c.ms - minMs) / (maxMs - minMs) * (RIGHT - LEFT); }
+
+    // Passage bands (numeric ascending, then unknown "P?").
+    var bandKeys = [], sBand = {};
+    clusters.forEach(function (c) { if (!sBand[c.pk]) { sBand[c.pk] = true; bandKeys.push(c.pk); } });
+    bandKeys.sort(function (a, b) { if (a === "?") return 1; if (b === "?") return -1; return a - b; });
+    var bandTop = {}, bandRows = {}, y = TOP;
+    bandKeys.forEach(function (k) {
+      var arr = clusters.filter(function (c) { return c.pk === k; }).sort(function (a, b) { return baseX(a) - baseX(b); });
+      var lastX = [];
+      arr.forEach(function (c) { var x = baseX(c), row = 0; for (; row < lastX.length; row++) { if (lastX[row] <= x - MINGAP) break; } lastX[row] = x; c._x = x; c._row = row; });
+      var rows = Math.max(1, lastX.length);
+      bandTop[k] = y; bandRows[k] = rows;
+      arr.forEach(function (c) { c._y = y + c._row * SUBH + SUBH / 2; });
+      y += rows * SUBH;
+    });
+    var H = y + 18;
+
+    // Lineage edges between CLUSTERS (parent's cluster → child's cluster), deduped.
+    var edges = "", eSeen = {};
+    vessels.forEach(function (v) {
+      if (!v.parentNodeId) return;
+      var pc = clOf[v.parentNodeId], cc = clOf[v.nodeId];
+      if (!pc || !cc || pc === cc) return;
+      var ek = pc.id + ">" + cc.id;
+      if (eSeen[ek]) return; eSeen[ek] = true;
+      var my = (pc._y + cc._y) / 2;
+      edges += '<path class="wlpc-tl-edge" d="M' + pc._x.toFixed(1) + " " + pc._y + " C" + pc._x.toFixed(1) + " " + my.toFixed(1) + " " + cc._x.toFixed(1) + " " + my.toFixed(1) + " " + cc._x.toFixed(1) + " " + cc._y + '"/>';
+    });
+
+    var bands = "";
+    bandKeys.forEach(function (k) {
+      var yc = bandTop[k] + bandRows[k] * SUBH / 2;
+      bands += '<line class="wlpc-tl-grid" x1="' + GUT + '" y1="' + yc + '" x2="' + RIGHT + '" y2="' + yc + '"/>' +
+        '<text class="wlpc-tl-band" x="' + (GUT - 6) + '" y="' + (yc + 4) + '" text-anchor="end">' + (k === "?" ? "P?" : "P" + k) + "</text>";
     });
 
     var axis = "";
-    if (dated.length && maxMs > minMs) {
-      var yb = H - 2;
+    if (datedC.length && maxMs > minMs) {
+      var yb = H - 4;
       axis = '<line class="wlpc-tl-axis" x1="' + LEFT + '" y1="' + yb + '" x2="' + RIGHT + '" y2="' + yb + '"/>' +
         '<text class="wlpc-tl-axlabel" x="' + LEFT + '" y="' + (yb - 4) + '" text-anchor="start">' + esc(shortDate(new Date(minMs).toISOString().slice(0, 10))) + "</text>" +
         '<text class="wlpc-tl-axlabel" x="' + RIGHT + '" y="' + (yb - 4) + '" text-anchor="end">' + esc(shortDate(new Date(maxMs).toISOString().slice(0, 10))) + "</text>";
     }
 
     var nodes = "";
-    vessels.forEach(function (v) {
+    clusters.forEach(function (c) {
+      var v = c.rep, n = c.members.length;
       var color = statusColor(v.status || "active");
-      var f = flags[v.nodeId] || {};
-      var uncertain = /^\s*[?~*]/.test(String(v.donor || ""));
+      var uncertain = c.members.some(function (m) { return /^\s*[?~*]/.test(String(m.donor || "")); });
+      var anyFlag = c.members.some(function (m) { var f = flags[m.nodeId] || {}; return f.orphan || f.crossDonor || f.passageBack; });
       var inner = (typeof window.wlpIconInner === "function") ? window.wlpIconInner(v.iconId) : "";
       var pass = (v.passage !== "" && v.passage != null) ? "P" + esc(v.passage) : "P?";
-      var flagged = f.orphan || f.crossDonor || f.passageBack;
-      var t = [recordName(v), pass, LOGIC().vesselTypeFromIcon(v.iconId), v.status || "active"];
+      var t = [(n > 1 ? n + "× " : "") + pass + (v.seedDate ? " · " + shortDate(v.seedDate) : ""), LOGIC().vesselTypeFromIcon(v.iconId), v.status || "active"];
+      if (n > 1) t.push(n + " flasks at this passage on one date — a split, or duplicate entries");
       if (uncertain) t.push("best guess (source marked uncertain)");
-      if (f.orphan) t.push("unlinked" + (f.orphanLabel ? ": " + f.orphanLabel : ""));
-      if (f.crossDonor) t.push("cross-donor");
-      if (f.passageBack) t.push("passage backwards");
       nodes +=
-        '<g class="wlpc-tl-node' + (flagged ? " is-flagged" : "") + '" data-node-id="' + esc(v.nodeId) + '" transform="translate(' + v._x.toFixed(1) + "," + v._y + ')">' +
+        '<g class="wlpc-tl-node' + (anyFlag ? " is-flagged" : "") + '" data-node-id="' + esc(v.nodeId) + '" transform="translate(' + c._x.toFixed(1) + "," + c._y + ')">' +
           "<title>" + esc(t.join(" · ")) + "</title>" +
           '<circle class="wlpc-tl-ring" r="' + NR + '" style="stroke:' + color + '"/>' +
-          '<g transform="translate(-13,-13) scale(0.40625)" style="color:' + color + '">' + inner + "</g>" +
-          '<text class="wlpc-tl-pass" y="-' + (NR + 4) + '" text-anchor="middle">' + pass + "</text>" +
-          (v.seedDate ? '<text class="wlpc-tl-date" y="' + (NR + 14) + '" text-anchor="middle">' + esc(shortDate(v.seedDate)) + "</text>" : "") +
-          (uncertain ? '<text class="wlpc-tl-guess" x="' + (NR - 1) + '" y="-' + (NR - 5) + '">?</text>' : "") +
-          (flagged ? '<circle class="wlpc-tl-flag" cx="' + (NR - 3) + '" cy="-' + (NR - 3) + '" r="4.5"/>' : "") +
+          '<g transform="translate(-11.5,-11.5) scale(0.36)" style="color:' + color + '">' + inner + "</g>" +
+          '<text class="wlpc-tl-date" y="' + (NR + 12) + '" text-anchor="middle">' + (v.seedDate ? esc(shortDate(v.seedDate)) : "—") + "</text>" +
+          (n > 1 ? '<circle class="wlpc-tl-count-bg" cx="' + (NR - 1) + '" cy="-' + (NR - 3) + '" r="8"/><text class="wlpc-tl-count" x="' + (NR - 1) + '" y="-' + (NR - 6) + '" text-anchor="middle">' + n + "</text>" : "") +
+          (uncertain ? '<text class="wlpc-tl-guess" x="-' + (NR - 1) + '" y="-' + (NR - 5) + '" text-anchor="end">?</text>' : "") +
+          (anyFlag ? '<circle class="wlpc-tl-flag" cx="-' + (NR - 2) + '" cy="' + (NR - 3) + '" r="4"/>' : "") +
         "</g>";
     });
 
-    return '<svg class="wlpc-tl-svg" viewBox="0 0 ' + W + " " + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + axis + edges + nodes + "</svg>";
+    return '<svg class="wlpc-tl-svg" viewBox="0 0 1000 ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + edges + nodes + "</svg>";
   }
 
   // Show the records view (and hide the canvas + palette) while the recorder

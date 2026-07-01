@@ -5312,6 +5312,11 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-tl-date { fill: var(--muted); font-size: 10.5px; font-family: var(--font-display, sans-serif); }
 .wlpc-tl-guess { fill: #ff9f0a; font-size: 13px; font-weight: 800; font-family: var(--font-display, sans-serif); }
 .wlpc-tl-flag { fill: #ffd60a; stroke: var(--panel, #2c2c2e); stroke-width: 1; }
+.wlpc-tl-band { fill: var(--muted); font-size: 12px; font-weight: 700; font-family: var(--font-display, sans-serif); }
+.wlpc-tl-grid { stroke: rgba(142, 142, 147, .13); stroke-width: 1; }
+.wlpc-tl-split { fill: #64d2ff; font-size: 15px; font-weight: 700; }
+.wlpc-tl-count-bg { fill: #64d2ff; }
+.wlpc-tl-count { fill: #0b0b0c; font-size: 11px; font-weight: 800; font-family: var(--font-display, sans-serif); }
 
 /* ── Cell Culture map: tidy-timeline lane bands + vessel cards ─────────────── */
 .culture-lanes { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
