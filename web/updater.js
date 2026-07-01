@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.40", date: "2026-06-18", changes: [
+      "CSV import is far more tolerant of real-world culture logs: it now parses compact YYYYMMDD dates (e.g. 20240828) and ordinal forms ('20th Aug 2025'), recognises 'ODOS' as both eyes (plus common typos), treats '?' and '-' as blank, and maps a 'Cell ID' column to the donor.",
+      "Donor IDs that carry the eye ('045986OD', '2025-4392ODOS') are split automatically — the donor reconciles into one lineage and the eye is recovered even when there's no separate eye column.",
+    ] },
     { version: "0.2.39", date: "2026-06-18", changes: [
       "Cell Culture Records → Tree: the lineage view is now a real family tree — card nodes with status colour, passage, vessel type and seed date, branch connectors, and per donor·eye group headers with an issue count.",
       "Messy-import reconciliation: inconsistent donor entry for the same donor (e.g. '6769', '6769.0', 'Donor 6769') is now normalised so passages stop fragmenting into separate lineages.",

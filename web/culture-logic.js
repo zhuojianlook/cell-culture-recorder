@@ -445,10 +445,31 @@
 
   function coerceEye(raw) {
     var v = str(raw).trim().toLowerCase();
-    if (["od", "r", "right", "right eye", "oculus dexter", "dexter"].indexOf(v) >= 0) return "OD";
-    if (["os", "l", "left", "left eye", "oculus sinister", "sinister"].indexOf(v) >= 0) return "OS";
-    if (["ou", "both", "both eyes", "bilateral", "pooled"].indexOf(v) >= 0) return "OU";
+    if (v === "" || v === "?" || v === "-") return "unknown";
+    if (["od", "r", "right", "right eye", "oculus dexter", "dexter", "odod"].indexOf(v) >= 0) return "OD";
+    if (["os", "l", "left", "left eye", "oculus sinister", "sinister", "osos"].indexOf(v) >= 0) return "OS";
+    // Both eyes / pooled — including the "ODOS" form these logs use most often.
+    if (["ou", "both", "both eyes", "bilateral", "pooled", "odos", "osod", "od os", "os od"].indexOf(v) >= 0) return "OU";
     return "unknown";
+  }
+
+  // Some logs concatenate the eye onto the donor id ("045986OD", "2025-4392ODOS",
+  // "2025-5923 OD"). Split so the donor id is clean and the eye is recovered.
+  // Returns { donor, eye } — eye is "" when nothing eye-like was embedded.
+  function splitDonorEye(raw) {
+    var s = str(raw).trim();
+    var m = s.match(/^(.*\d)\s*((?:od|os)+)$/i);
+    if (m) {
+      var eye = coerceEye(m[2]);
+      return { donor: m[1].trim(), eye: eye === "unknown" ? "" : eye };
+    }
+    return { donor: s, eye: "" };
+  }
+
+  // Missing-value tokens used throughout the logs ("?", "-", "n/a", "none").
+  function notMissing(v) {
+    var s = str(v).trim(), lo = s.toLowerCase();
+    return (s === "?" || s === "-" || lo === "n/a" || lo === "na" || lo === "none") ? "" : s;
   }
   function coerceStatus(raw) {
     var v = str(raw).trim().toLowerCase();
@@ -471,12 +492,20 @@
   // ISO YYYY-MM-DD or null when empty/ambiguous (a bare "5/4/2026" is NOT guessed).
   function coerceDate(raw) {
     var v = str(raw).trim();
-    if (!v) return null;
+    if (!v || v === "-" || v === "?") return null;
     var iso = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
     if (iso) return fmtYmd(Number(iso[1]), Number(iso[2]), Number(iso[3]));
     var ymd = v.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
     if (ymd) return fmtYmd(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
+    // Compact YYYYMMDD, optionally trailed by an HHMM time (a common raw entry,
+    // e.g. "20240828" or "20250813 0154").
+    var compact = v.match(/^(20\d{2})(\d{2})(\d{2})(?:[ T]?\d{3,4})?$/);
+    if (compact) {
+      var cy = Number(compact[1]), cm = Number(compact[2]), cd = Number(compact[3]);
+      if (validYmd(cy, cm, cd)) return fmtYmd(cy, cm, cd);
+    }
     var cleaned = v.replace(/,/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+    cleaned = cleaned.replace(/(\d)(st|nd|rd|th)\b/g, "$1"); // "20th aug 2025" -> "20 aug 2025"
     var m = cleaned.match(/^(\d{1,2})[ -]([a-z]+)[ -](\d{4})$/);
     if (m && MONTHS[m[2]]) return fmtYmd(Number(m[3]), MONTHS[m[2]], Number(m[1]));
     m = cleaned.match(/^([a-z]+)[ -](\d{1,2})[ -](\d{4})$/);
@@ -519,7 +548,7 @@
   }
 
   var IMPORT_FIELDS = [
-    { key: "donor", aliases: ["donor", "donor id", "donor identifier", "patient", "subject", "donornumber"] },
+    { key: "donor", aliases: ["donor", "donor id", "donor identifier", "patient", "subject", "donornumber", "cell id", "cellid"] },
     { key: "eye", aliases: ["eye", "laterality", "side", "od os"] },
     { key: "passage", aliases: ["passage", "passage number", "passage no", "pn"] },
     // vessel BEFORE label so a "flask"/"vessel" column claims the type, not the
@@ -574,9 +603,14 @@
     var drafts = rows.slice(1).map(function (row) {
       var passageRaw = cell(row, "passage").replace(/^p\.?\s*/i, "");
       var passageDigits = (passageRaw.match(/-?\d+/) || [""])[0];
+      // Donor id may carry the eye ("045986OD") — split it, and fall back to the
+      // embedded eye when there's no separate (usable) eye column.
+      var split = splitDonorEye(notMissing(cell(row, "donor")));
+      var eyeVal = coerceEye(cell(row, "eye"));
+      if (eyeVal === "unknown" && split.eye) eyeVal = split.eye;
       return {
-        donor: cell(row, "donor"),
-        eye: coerceEye(cell(row, "eye")),
+        donor: split.donor,
+        eye: eyeVal,
         passage: passageDigits,
         label: cell(row, "label"),
         iconId: vesselIconFromText(cell(row, "vessel")),
@@ -741,6 +775,7 @@
     lineageFlags: lineageFlags,
     parseCsv: parseCsv,
     coerceEye: coerceEye,
+    splitDonorEye: splitDonorEye,
     coerceStatus: coerceStatus,
     coerceDate: coerceDate,
     coerceSourceRecordType: coerceSourceRecordType,

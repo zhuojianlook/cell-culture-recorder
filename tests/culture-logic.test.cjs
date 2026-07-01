@@ -337,6 +337,46 @@ test("normalizeDonor reconciles common data-entry variants of one donor", () => 
   assert.ok(!L.sameDonorEye({ donor: "6769", eye: "OD" }, { donor: "7012", eye: "OD" }));
 });
 
+test("coerceDate handles compact YYYYMMDD, +time and ordinals (real-log formats)", () => {
+  assert.equal(L.coerceDate("20240828"), "2024-08-28");
+  assert.equal(L.coerceDate("20250813 0154"), "2025-08-13");
+  assert.equal(L.coerceDate("20th Aug 2025"), "2025-08-20");
+  assert.equal(L.coerceDate("2025-06-11 00:00:00"), "2025-06-11");
+  assert.equal(L.coerceDate("-"), null);
+  assert.equal(L.coerceDate("?"), null);
+  assert.equal(L.coerceDate("5146"), null);      // a short id is not a date
+  assert.equal(L.coerceDate("20241350"), null);  // invalid month/day rejected
+});
+
+test("coerceEye handles ODOS (both eyes) and typos", () => {
+  assert.equal(L.coerceEye("ODOS"), "OU");
+  assert.equal(L.coerceEye("odos"), "OU");
+  assert.equal(L.coerceEye("ODOD"), "OD");
+  assert.equal(L.coerceEye("?"), "unknown");
+  assert.equal(L.coerceEye("OD"), "OD");
+});
+
+test("splitDonorEye extracts an eye embedded in the donor id", () => {
+  assert.deepEqual(L.splitDonorEye("045986OD"), { donor: "045986", eye: "OD" });
+  assert.deepEqual(L.splitDonorEye("2025-4392ODOS"), { donor: "2025-4392", eye: "OU" });
+  assert.deepEqual(L.splitDonorEye("2025-5923 OS"), { donor: "2025-5923", eye: "OS" });
+  assert.deepEqual(L.splitDonorEye("13117OD"), { donor: "13117", eye: "OD" });
+  assert.deepEqual(L.splitDonorEye("2025-3685"), { donor: "2025-3685", eye: "" });
+});
+
+test("importCsvToDrafts recovers Cell-ID donor, YYYYMMDD dates and embedded eye", () => {
+  const csv = "Cell ID,Passage,Seed Date\n13117OD,P2,20240828\n5146,P0?,2024-08-14\n?,P1,-\n";
+  const { drafts } = L.importCsvToDrafts(csv);
+  assert.equal(drafts[0].donor, "13117");
+  assert.equal(drafts[0].eye, "OD");
+  assert.equal(drafts[0].passage, "2");
+  assert.equal(drafts[0].seedDate, "2024-08-28");
+  assert.equal(drafts[1].donor, "5146");
+  assert.equal(drafts[1].passage, "0"); // "P0?" -> 0
+  assert.equal(drafts[2].donor, "");    // "?"  -> blank
+  assert.equal(drafts[2].seedDate, ""); // "-"  -> blank
+});
+
 test("parseEvents is tolerant of bad input", () => {
   assert.deepEqual(L.parseEvents('[{"type":"feed"}]'), [{ type: "feed" }]);
   assert.deepEqual(L.parseEvents(""), []);
