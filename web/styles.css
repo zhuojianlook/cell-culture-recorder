@@ -5350,6 +5350,7 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-rc-id { font-weight: 600; color: var(--text); font-size: .84rem; }
 .wlpc-rc-eye { font-size: .68rem; font-weight: 700; color: #64d2ff; }
 .wlpc-rc-gt { font-size: .72rem; color: #ff9f0a; }
+.wlpc-rc-src { font-size: .66rem; font-weight: 700; color: #30d158; background: rgba(48,209,88,.14); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
 .wlpc-rc-hint { font-size: .72rem; color: var(--muted); }
 .wlpc-rc-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .wlpc-rc-btn { padding: 3px 10px; border-radius: 7px; border: 1px solid rgba(142,142,147,.3); background: rgba(255,255,255,.04); color: var(--text); font-size: .76rem; cursor: pointer; transition: background 120ms ease, border-color 120ms ease; }

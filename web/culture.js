@@ -675,9 +675,15 @@
     var b = [];
     if (d.dissociation) b.push("dissoc " + shortDate(d.dissociation));
     if (d.deceased) b.push("deceased " + shortDate(d.deceased));
+    if (d.cod) b.push(d.cod);
     if (d.seeding) b.push("seeding " + d.seeding);
-    if (d.age) b.push(d.age + (d.sex ? d.sex : "") + "y");
+    if (d.age) b.push(d.age + (d.sex ? " " + d.sex : ""));
+    if (d.serology) b.push(d.serology);
     return b.join(" · ");
+  }
+  // A small "eye-bank verified" chip when the donor's ground truth came from a PDF.
+  function gtSourceChip(d) {
+    return d && d.gtSource ? ' <span class="wlpc-rc-src" title="Ground truth from ' + esc(d.gtSource) + '">✓ eye-bank</span>' : "";
   }
   function renderReconcilePanel() {
     if (!view) return;
@@ -734,6 +740,7 @@
         html += '<div class="wlpc-rc-row">' +
           '<div class="wlpc-rc-main"><span class="wlpc-rc-id">' + esc(f.donor.donor) + '</span>' +
             (f.donor.eye ? ' <span class="wlpc-rc-eye">' + esc(String(f.donor.eye).toUpperCase()) + '</span>' : '') +
+            gtSourceChip(f.donor) +
             (gt ? ' <span class="wlpc-rc-gt">' + esc(gt) + '</span>' : '') +
             '<span class="wlpc-rc-hint">matches ' + f.candidates.length + ' vessel ids — which is it?</span></div>' +
           '<div class="wlpc-rc-acts">' +
@@ -835,6 +842,8 @@
       if (d.dissociation && !read(n, "DissociationDate", "")) { write(n, "DissociationDate", d.dissociation); changed++; }
       var gt = [];
       if (d.deceased) gt.push("deceased " + d.deceased);
+      if (d.cod) gt.push("COD " + d.cod);
+      if (d.serology) gt.push(d.serology);
       if (d.seeding) gt.push("seeding " + d.seeding);
       if (d.age) gt.push("age " + d.age + (d.sex || ""));
       if (gt.length) {
@@ -1158,22 +1167,32 @@
         preservation: col(r, "preservationdate"), processing: col(r, "processingdate"),
         seeding: col(r, "seedingsuccess"), age: col(r, "age"), sex: col(r, "sex"),
         ethnicity: col(r, "ethnicity"), endothelial: col(r, "endothelialdensity"),
+        cod: col(r, "causeofdeath"), deathTime: col(r, "deathdatetime"),
+        serology: col(r, "serology"), gtSource: col(r, "groundtruthsource"),
         allFields: col(r, "allfields")
       });
     }
     if (!recs.length) { showImportStatus("No donor rows found in that CSV.", true); return; }
-    var existing = (typeof window.wlpLoadCultureDonors === "function") ? (window.wlpLoadCultureDonors() || []) : [];
-    var seen = {};
-    existing.forEach(function (d) { seen[(d.donor || "") + "||" + (d.source || "")] = true; });
-    var added = 0;
-    recs.forEach(function (d) {
-      var k = d.donor + "||" + d.source;
-      if (!seen[k]) { existing.push(d); seen[k] = true; added++; }
+    // combined_donors.csv is a COMPLETE consolidation, so replace the registry
+    // rather than append (re-running the consolidation changes source strings and
+    // would otherwise duplicate rows). Carry over the user's confirm/dismiss
+    // decisions by donor id so re-importing an updated file doesn't lose them.
+    var prev = (typeof window.wlpLoadCultureDonors === "function") ? (window.wlpLoadCultureDonors() || []) : [];
+    var decided = {};
+    prev.forEach(function (d) {
+      if (d && (d.confirmedVessel || d._dismissed)) {
+        decided[String(d.donor || "").toLowerCase()] = { confirmedVessel: d.confirmedVessel, _dismissed: d._dismissed };
+      }
     });
-    if (typeof window.wlpSaveCultureDonors === "function") window.wlpSaveCultureDonors(existing);
+    var carried = 0;
+    recs.forEach(function (d) {
+      var v = decided[String(d.donor || "").toLowerCase()];
+      if (v) { if (v.confirmedVessel) d.confirmedVessel = v.confirmedVessel; if (v._dismissed) d._dismissed = true; carried++; }
+    });
+    if (typeof window.wlpSaveCultureDonors === "function") window.wlpSaveCultureDonors(recs);
     renderView();
     showImportStatus("Imported " + recs.length + " donor record" + (recs.length === 1 ? "" : "s") +
-      " (" + added + " new) — see “Needs confirmation”.", false);
+      (carried ? " (kept " + carried + " confirmed/dismissed)" : "") + " — see “Needs confirmation”.", false);
   }
 
   function runCsvImport(text) {

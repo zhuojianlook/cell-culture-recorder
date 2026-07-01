@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.46", date: "2026-07-01", changes: [
+      "Donor ground truth now includes the eye-bank Tissue Report PDFs, as the authoritative source: precise date-time of death, cause of death, per-eye endothelial density, age/sex/race and serology override the spreadsheet-derived values where they differ (they agreed on 26/26 death dates and corrected one). Donor records backed by a PDF are marked “✓ eye-bank” in the Needs confirmation panel, and confirming such a match fuses that ground truth onto the vessel(s).",
+      "Re-importing a donor CSV now replaces the registry (it's a full consolidation) instead of appending duplicate rows, and preserves your existing confirm / dismiss decisions by donor id.",
+    ] },
     { version: "0.2.45", date: "2026-07-01", changes: [
       "New donor ground-truth layer: import a donor CSV (donor identity + deceased / dissociation / preservation dates, seeding success, demographics) and it’s stored per-project and reconciled against your vessels. Import auto-detects donor vs. vessel CSVs.",
       "New “Needs confirmation” region at the top of Cell Culture Records: surfaces the reconciliation gaps for you to resolve — ambiguous donor↔vessel matches (the same donor logged as ‘2025-4392’, ‘?2025-4392’, a ‘LEI-25-…’ id, or a date-id with a ‘(3468)’ cross-reference), vessels whose declared lineage parent was never found, and — collapsed — donors with no vessel and vessels with no donor record.",
