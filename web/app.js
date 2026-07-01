@@ -854,6 +854,60 @@ window.wlpMarkCanvasDirty = scheduleCanvasSync;
 window.wlpFocusNode = function (nodeId) {
   try { focusNodeById(nodeId); } catch (e) { /* ignore */ }
 };
+// Merge duplicate culture vessels (same passage + seed date) into one survivor.
+// The Records timeline groups such vessels into a ×N node; when the user decides
+// they are the same flask logged twice (not a real split), this collapses them:
+//  - any child that used a victim as its lineage parent is re-pointed at survivor
+//  - the survivor inherits a parent / notes / media / seed date it happens to lack
+//    so nothing is silently lost
+//  - each victim is torn down safely (connections + storage-box slot), mirroring
+//    handleDeleteSelection's node path, then the canvas is marked dirty.
+// Returns the number of vessels actually removed.
+window.wlpMergeCultureNodes = function (survivorId, victimIds) {
+  if (!survivorId || !Array.isArray(victimIds) || !victimIds.length) return 0;
+  const survivor = canvas.querySelector('.drop[data-node-id="' + survivorId + '"]');
+  if (!survivor) return 0;
+  let removed = 0;
+  victimIds.forEach((vid) => {
+    if (!vid || vid === survivorId) return;
+    const victim = canvas.querySelector('.drop[data-node-id="' + vid + '"]');
+    if (!victim) return;
+    // Children that used the victim as their lineage parent now point at survivor.
+    canvas
+      .querySelectorAll('.drop[data-culture-parent-node-id="' + vid + '"]')
+      .forEach((child) => { child.dataset.cultureParentNodeId = survivorId; });
+    // Survivor inherits a lineage parent it lacks (never itself → no self-loop).
+    if (!survivor.dataset.cultureParentNodeId && victim.dataset.cultureParentNodeId &&
+        victim.dataset.cultureParentNodeId !== survivorId) {
+      survivor.dataset.cultureParentNodeId = victim.dataset.cultureParentNodeId;
+    }
+    // Preserve distinct notes so a merge never silently drops information.
+    const vn = (victim.dataset.cultureNotes || "").trim();
+    if (vn) {
+      const sn = (survivor.dataset.cultureNotes || "").trim();
+      if (!sn) survivor.dataset.cultureNotes = vn;
+      else if (sn.indexOf(vn) < 0) survivor.dataset.cultureNotes = sn + " · " + vn;
+    }
+    // Fill empty survivor fields from the victim (best-effort, don't overwrite).
+    ["cultureMedium", "cultureSeedDate", "cultureStatus", "cultureDissociationDate"].forEach((k) => {
+      if (!survivor.dataset[k] && victim.dataset[k]) survivor.dataset[k] = victim.dataset[k];
+    });
+    // Safe teardown — mirrors handleDeleteSelection's node branch.
+    try { removeConnectionsForNode(vid); } catch (e) { /* */ }
+    try {
+      if (typeof removeVesselFromAllBoxes === "function" && removeVesselFromAllBoxes(vid)) {
+        persistStorageBoxes();
+      }
+    } catch (e) { /* */ }
+    victim.remove();
+    removed++;
+  });
+  if (removed) {
+    try { updateAllConnections(); } catch (e) { /* */ }
+    if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+  }
+  return removed;
+};
 window.wlpActiveWorkspace = function () { return activeWorkspaceId; };
 window.wlpSetWorkspace = function (id) { try { setActiveWorkspace(id); } catch (e) { /* ignore */ } };
 // Open the (shared) Media Plan scheduler for a vessel node — lets the culture

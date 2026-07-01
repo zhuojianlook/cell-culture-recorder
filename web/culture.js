@@ -762,18 +762,112 @@
 
   // Wire a clickable row/tree-node -> jump to the Cell Culture timeline + edit.
   // (Hover is handled by CSS :hover on .wlpc-tree-row.)
+  // Open a vessel's record: switch to the Cell Culture canvas, focus the node,
+  // then pop the editor (the behaviour used throughout the recorder).
+  function focusAndOpen(id) {
+    var node = id && document.querySelector('.drop[data-node-id="' + id + '"]');
+    if (!node) return;
+    if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("cell-culture");
+    syncView();
+    setTimeout(function () {
+      if (typeof window.wlpFocusNode === "function") window.wlpFocusNode(id);
+      openRecord(node);
+    }, 80);
+  }
+
   function wireRowClick(el) {
     el.addEventListener("click", function () {
-      var id = el.getAttribute("data-node-id");
-      var node = document.querySelector('.drop[data-node-id="' + id + '"]');
-      if (!node) return;
-      if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("cell-culture");
-      syncView();
-      setTimeout(function () {
-        if (typeof window.wlpFocusNode === "function") window.wlpFocusNode(id);
-        openRecord(node);
-      }, 80);
+      // A ×N cluster (vessels sharing a passage + seed date) expands to its
+      // members so the user can decide split-vs-duplicate; a lone node opens
+      // its record directly.
+      var members = (el.getAttribute("data-cluster-members") || "").split(",").filter(Boolean);
+      if (members.length > 1) { openClusterPanel(members); return; }
+      focusAndOpen(el.getAttribute("data-node-id"));
     });
+  }
+
+  var clusterBackdrop = null;
+  function closeClusterPanel() {
+    if (clusterBackdrop) { clusterBackdrop.classList.add("is-hidden"); clusterBackdrop.style.display = "none"; }
+  }
+  // Expand a ×N timeline cluster: list the individual flasks that share this
+  // passage + seed date so the user can open any one, or — if they turn out to
+  // be the same flask logged twice — pick which to KEEP and merge the rest in.
+  function openClusterPanel(memberIds) {
+    var members = memberIds
+      .map(function (id) { return document.querySelector('.drop[data-node-id="' + id + '"]'); })
+      .filter(Boolean);
+    if (members.length <= 1) { if (members[0]) focusAndOpen(members[0].dataset.nodeId); return; }
+
+    if (!clusterBackdrop) {
+      clusterBackdrop = document.createElement("div");
+      clusterBackdrop.className = "modal-backdrop modal-backdrop--center is-hidden";
+      clusterBackdrop.style.zIndex = "10001";
+      document.body.appendChild(clusterBackdrop);
+      clusterBackdrop.addEventListener("click", function (e) { if (e.target === clusterBackdrop) closeClusterPanel(); });
+    }
+    var rep = recordOf(members[0]);
+    var head = (LOGIC().normalizeDonor(rep.donor) || "Unknown donor") +
+      (rep.eye && rep.eye !== "unknown" ? " · " + String(rep.eye).toUpperCase() : "") +
+      " · P" + (rep.passage !== "" && rep.passage != null ? esc(rep.passage) : "?") +
+      (rep.seedDate ? " · " + esc(shortDate(rep.seedDate)) : "");
+
+    var rows = members.map(function (n, i) {
+      var r = recordOf(n);
+      var notes = read(n, "Notes", "");
+      var media = read(n, "Medium", "");
+      var meta = [LOGIC().vesselTypeFromIcon(r.iconId), r.status || "active"];
+      if (media) meta.push(media);
+      if (notes) meta.push(notes.slice(0, 48) + (notes.length > 48 ? "…" : ""));
+      return '<div class="wlpc-cl-row">' +
+        '<label class="wlpc-cl-keep" title="Keep this one when merging">' +
+          '<input type="radio" name="wlpcSurv" value="' + esc(n.dataset.nodeId) + '"' + (i === 0 ? " checked" : "") + ">" +
+          "<span>keep</span>" +
+        "</label>" +
+        '<button type="button" class="wlpc-cl-open" data-open="' + esc(n.dataset.nodeId) + '">' +
+          '<span class="wlpc-cl-name">' + esc(nodeLabel(n)) + "</span>" +
+          '<span class="wlpc-cl-meta">' + esc(meta.join(" · ")) + "</span>" +
+        "</button>" +
+      "</div>";
+    }).join("");
+
+    clusterBackdrop.innerHTML =
+      '<div class="modal" style="max-width:540px;width:540px;margin-top:9vh">' +
+        '<div class="modal__header" style="display:flex;align-items:center;justify-content:space-between">' +
+          "<h3 style=\"margin:0\">" + members.length + " flasks — split or duplicate?</h3>" +
+          '<button type="button" class="btn wlpc-cl-x" id="wlpcClX" aria-label="Close">✕</button>' +
+        "</div>" +
+        '<div class="modal__body">' +
+          '<p class="wlpc-cl-lead">' + head + "</p>" +
+          '<p class="wlpc-cl-hint">These vessels share a passage <em>and</em> a seed date. If they are the same flask entered more than once, choose which to <strong>keep</strong> and merge the rest into it. If they are real splits from one parent, leave them as ' + members.length + " separate vessels.</p>" +
+          '<div class="wlpc-cl-list">' + rows + "</div>" +
+        "</div>" +
+        '<div class="modal__footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">' +
+          '<button type="button" class="btn" id="wlpcClCancel">Keep separate</button>' +
+          '<button type="button" class="btn btn--danger" id="wlpcClMerge">Merge into 1</button>' +
+        "</div>" +
+      "</div>";
+    clusterBackdrop.classList.remove("is-hidden");
+    clusterBackdrop.style.display = "flex";
+
+    clusterBackdrop.querySelector("#wlpcClX").onclick = closeClusterPanel;
+    clusterBackdrop.querySelector("#wlpcClCancel").onclick = closeClusterPanel;
+    Array.prototype.forEach.call(clusterBackdrop.querySelectorAll(".wlpc-cl-open"), function (b) {
+      b.onclick = function () { closeClusterPanel(); focusAndOpen(b.getAttribute("data-open")); };
+    });
+    clusterBackdrop.querySelector("#wlpcClMerge").onclick = function () {
+      var sel = clusterBackdrop.querySelector('input[name="wlpcSurv"]:checked');
+      var survivor = sel ? sel.value : members[0].dataset.nodeId;
+      var victims = members
+        .map(function (n) { return n.dataset.nodeId; })
+        .filter(function (id) { return id && id !== survivor; });
+      if (typeof window.wlpMergeCultureNodes !== "function") { closeClusterPanel(); return; }
+      var removed = window.wlpMergeCultureNodes(survivor, victims);
+      closeClusterPanel();
+      renderView();
+      try { renderBadges(); } catch (e) { /* ignore */ }
+      showImportStatus("Merged " + removed + " duplicate" + (removed === 1 ? "" : "s") + " into one vessel.", false);
+    };
   }
 
   // Candidate match keys for a draft, used to resolve a CSV's parent label to a
@@ -1026,7 +1120,9 @@
       if (n > 1) t.push(n + " flasks at this passage on one date — a split, or duplicate entries");
       if (uncertain) t.push("best guess (source marked uncertain)");
       nodes +=
-        '<g class="wlpc-tl-node' + (anyFlag ? " is-flagged" : "") + '" data-node-id="' + esc(v.nodeId) + '" transform="translate(' + c._x.toFixed(1) + "," + c._y + ')">' +
+        '<g class="wlpc-tl-node' + (anyFlag ? " is-flagged" : "") + (n > 1 ? " is-cluster" : "") + '" data-node-id="' + esc(v.nodeId) + '"' +
+          (n > 1 ? ' data-cluster-members="' + esc(c.members.map(function (m) { return m.nodeId; }).join(",")) + '"' : "") +
+          ' transform="translate(' + c._x.toFixed(1) + "," + c._y + ')">' +
           "<title>" + esc(t.join(" · ")) + "</title>" +
           '<circle class="wlpc-tl-ring" r="' + NR + '" style="stroke:' + color + '"/>' +
           '<g transform="translate(-11.5,-11.5) scale(0.36)" style="color:' + color + '">' + inner + "</g>" +

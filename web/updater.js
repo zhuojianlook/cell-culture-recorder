@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.43", date: "2026-07-01", changes: [
+      "Records → Timeline: click a ×N cluster to expand it. A panel lists the individual flasks that share that passage and seed date — each with its vessel type, status, medium and notes — so you can tell a real split (different conditions) from the same flask logged twice.",
+      "If they are duplicates, pick which flask to keep and ‘Merge into 1’: the rest are removed, any lineage that pointed at them is re-pointed onto the one you kept, and any distinct notes / medium / seed date are carried over so nothing is lost.",
+    ] },
     { version: "0.2.42", date: "2026-07-01", changes: [
       "Cell Culture Records → Timeline is much cleaner: passages are now banded top-to-bottom (P0, P1, P2 …) with time running left-to-right, so a lineage reads straight down the page instead of tangling across lanes.",
       "Vessels that share the same passage AND the same seed date are collapsed into a single node with a ×N badge. This surfaces the 'split or duplicate' case directly — N flasks split from one parent on the same day, or N repeated log entries — instead of stacking N identical symbols on top of each other.",
