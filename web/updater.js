@@ -33,6 +33,11 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.39", date: "2026-06-18", changes: [
+      "Cell Culture Records → Tree: the lineage view is now a real family tree — card nodes with status colour, passage, vessel type and seed date, branch connectors, and per donor·eye group headers with an issue count.",
+      "Messy-import reconciliation: inconsistent donor entry for the same donor (e.g. '6769', '6769.0', 'Donor 6769') is now normalised so passages stop fragmenting into separate lineages.",
+      "The tree flags the problems that matter in real bookkeeping: 'unlinked' (a declared parent that wasn't found, with its label), 'cross-donor' (an impossible passage), and 'passage ↓' (a child whose passage isn't greater than its parent).",
+    ] },
     { version: "0.2.38", date: "2026-06-18", changes: [
       "Fix: drag-and-drop works again in the desktop app — you can drag icons from the palette onto the canvas to place vessels/nodes, drag to reposition them, and rearrange storage-box slots. The Tauri webview had been intercepting HTML5 drag-and-drop; that native interception is now disabled.",
     ] },

@@ -349,9 +349,23 @@
   // either side is a wildcard (so partially-filled records still link rather than
   // being wrongly rejected). Used by CSV import, the editor dropdown, the canvas
   // connection coupling, and the load-time migration below.
+  // Canonicalize a donor id so common data-entry variants of the SAME donor
+  // reconcile instead of fragmenting the lineage: collapse/trim whitespace, strip
+  // a leading descriptor prefix (Donor/Patient/Subject/Sample/Case) when a numeric
+  // id follows, and strip an Excel ".0" float artifact on a numeric id. Case is
+  // preserved for display; callers lower-case for comparison. Conservative on
+  // purpose — e.g. "Donor 6769", "6769 " and "6769.0" all → "6769", but "Donor
+  // Smith" is left untouched (no digit follows the prefix).
+  function normalizeDonor(raw) {
+    var s = str(raw).replace(/\s+/g, " ").trim();
+    s = s.replace(/^(donor|patient|subject|sample|case)\b[\s:#.\-]*(?=\d)/i, "");
+    s = s.replace(/^(\d+)\.0+$/, "$1");
+    return s.trim();
+  }
+
   function sameDonorEye(a, b) {
     a = a || {}; b = b || {};
-    var da = str(a.donor).trim().toLowerCase(), db = str(b.donor).trim().toLowerCase();
+    var da = normalizeDonor(a.donor).toLowerCase(), db = normalizeDonor(b.donor).toLowerCase();
     if (da && db && da !== db) return false;
     var ea = str(a.eye).trim().toLowerCase(), eb = str(b.eye).trim().toLowerCase();
     function blankEye(e) { return e === "" || e === "unknown"; }
@@ -638,6 +652,39 @@
     return out;
   }
 
+  // Per-record lineage anomaly flags for the family-tree view — the signals that
+  // matter when reconciling messy bookkeeping:
+  //   orphan      : a parent was intended (a raw parentLabel, or a parentNodeId
+  //                 pointing at a now-missing vessel) but nothing is linked.
+  //   crossDonor  : the linked parent is a DIFFERENT donor/eye (impossible passage).
+  //   passageBack : child passage number <= parent's (passages should increase).
+  // (No "duplicate" flag: same-passage siblings are normal here — splits and
+  // replicates routinely produce several vessels at one passage — so flagging
+  // them would just cry wolf. cultureWarnings covers the real per-record gaps.)
+  // Returns a map of nodeId -> flags object.
+  function lineageFlags(records) {
+    records = records || [];
+    var byId = {};
+    records.forEach(function (r) { byId[str(r.nodeId)] = r; });
+    var out = {};
+    records.forEach(function (r) {
+      var id = str(r.nodeId);
+      var f = (out[id] = { orphan: false, orphanLabel: "", crossDonor: false, passageBack: false });
+      var pid = str(r.parentNodeId);
+      var parent = pid && byId[pid] ? byId[pid] : null;
+      if (parent) {
+        if (!sameDonorEye(r, parent)) f.crossDonor = true;
+        var cp = num(r.passage), pp = num(parent.passage);
+        if (cp != null && pp != null && !isNaN(cp) && !isNaN(pp) && cp <= pp) f.passageBack = true;
+      } else if (str(r.parentLabel).trim() || pid) {
+        // A parent was intended (a raw label, or a dangling id) but isn't linked.
+        f.orphan = true;
+        f.orphanLabel = str(r.parentLabel).trim();
+      }
+    });
+    return out;
+  }
+
   // ─── Events / passaging ───────────────────────────────────────────────────
   // An event is { type, at (YYYY-MM-DD), confluence, viability, splitRatio,
   // medium, operator, notes, seq }. Stored as a JSON array on
@@ -691,6 +738,7 @@
     summarizeEvent: summarizeEvent,
     buildLineageForest: buildLineageForest,
     flattenForest: flattenForest,
+    lineageFlags: lineageFlags,
     parseCsv: parseCsv,
     coerceEye: coerceEye,
     coerceStatus: coerceStatus,
@@ -721,6 +769,7 @@
     maxNodeIdNumber: maxNodeIdNumber,
     nextNodeIdCounter: nextNodeIdCounter,
     danglingChildIds: danglingChildIds,
+    normalizeDonor: normalizeDonor,
     sameDonorEye: sameDonorEye,
     crossDonorChildIds: crossDonorChildIds,
     childrenOf: childrenOf,

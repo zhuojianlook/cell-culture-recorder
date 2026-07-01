@@ -297,6 +297,46 @@ test("buildLineageForest treats dangling parents as roots + is cycle-safe", () =
   assert.ok(L.flattenForest(f).length >= 1);
 });
 
+test("lineageFlags surfaces messy-bookkeeping anomalies", () => {
+  const recs = [
+    { nodeId: "p0", donor: "6769", eye: "OD", passage: "0" },
+    { nodeId: "p1", donor: "6769", eye: "OD", passage: "1", parentNodeId: "p0" },
+    { nodeId: "p2", donor: "6769", eye: "OD", passage: "2", parentNodeId: "p1" },
+    // orphan: has a raw parentLabel that never resolved (no parentNodeId)
+    { nodeId: "orph", donor: "6769", eye: "OD", passage: "3", parentLabel: "6769 OD P1x" },
+    // cross-donor: linked parent is a different donor
+    { nodeId: "xd", donor: "7012", eye: "OS", passage: "2", parentNodeId: "p1" },
+    // passage-back: child passage <= parent's
+    { nodeId: "back", donor: "6769", eye: "OD", passage: "1", parentNodeId: "p2" },
+    // dangling parentNodeId -> orphan
+    { nodeId: "dang", donor: "8890", eye: "OS", passage: "5", parentNodeId: "gone" },
+  ];
+  const f = L.lineageFlags(recs);
+  assert.equal(f["p1"].orphan, false);
+  assert.equal(f["p1"].crossDonor, false);
+  assert.equal(f["orph"].orphan, true);
+  assert.equal(f["orph"].orphanLabel, "6769 OD P1x");
+  assert.equal(f["xd"].crossDonor, true);
+  assert.equal(f["back"].passageBack, true);
+  assert.equal(f["dang"].orphan, true);
+  // p0 is a clean root: no flags
+  assert.deepEqual(f["p0"], { orphan: false, orphanLabel: "", crossDonor: false, passageBack: false });
+});
+
+test("normalizeDonor reconciles common data-entry variants of one donor", () => {
+  assert.equal(L.normalizeDonor("6769 "), "6769");
+  assert.equal(L.normalizeDonor("6769.0"), "6769");
+  assert.equal(L.normalizeDonor("Donor 6769"), "6769");
+  assert.equal(L.normalizeDonor("patient: 6769"), "6769");
+  assert.equal(L.normalizeDonor("Donor Smith"), "Donor Smith"); // no digit after prefix -> untouched
+  assert.equal(L.normalizeDonor(""), "");
+  // a passage now links across those variants (same donor + eye)...
+  assert.ok(L.sameDonorEye({ donor: "Donor 6769", eye: "OD" }, { donor: "6769", eye: "OD" }));
+  assert.ok(L.sameDonorEye({ donor: "6769.0", eye: "OD" }, { donor: "6769", eye: "OD" }));
+  // ...but genuinely different donors still don't merge
+  assert.ok(!L.sameDonorEye({ donor: "6769", eye: "OD" }, { donor: "7012", eye: "OD" }));
+});
+
 test("parseEvents is tolerant of bad input", () => {
   assert.deepEqual(L.parseEvents('[{"type":"feed"}]'), [{ type: "feed" }]);
   assert.deepEqual(L.parseEvents(""), []);

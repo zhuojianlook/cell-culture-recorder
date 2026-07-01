@@ -5255,9 +5255,47 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-ok { color: #48484a; }
 .wlpc-empty { padding: 48px 24px; text-align: center; color: var(--muted); line-height: 1.7; }
 .wlpc-empty strong { color: var(--accent); }
-.wlpc-tree-group { margin: 16px 14px 4px; color: var(--muted); font-size: .7rem; letter-spacing: .05em; text-transform: uppercase; font-weight: 600; }
-.wlpc-tree-row { cursor: pointer; padding: 6px 12px; border-radius: 6px; font-size: .82rem; color: var(--text); }
-.wlpc-tree-row:hover { background: rgba(229, 229, 234,.045); }
+/* ── Cell Culture family tree (Records → Tree view) ───────────────────────── */
+.wlpc-tree { padding: 2px 12px 20px; }
+.wlpc-tree-group { margin-top: 16px; }
+.wlpc-tree-group__hd {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 2px 8px; border-bottom: 1px solid rgba(142, 142, 147, .16);
+}
+.wlpc-tree-group__name { font-weight: 600; color: var(--text); font-size: .9rem; }
+.wlpc-tree-group__count { color: var(--muted); font-size: .76rem; }
+.wlpc-tree-group__issues { color: var(--accent-2, #ffd60a); font-size: .74rem; font-weight: 500; margin-left: auto; }
+
+.wlpc-forest { list-style: none; margin: 0; padding: 0; }
+.wlpc-forest--root { padding-top: 8px; }
+/* nested generations get an indented connector rail */
+.wlpc-forest .wlpc-forest { margin-left: 20px; padding-left: 16px; border-left: 1px solid rgba(142, 142, 147, .24); }
+.wlpc-branch { position: relative; }
+/* elbow tick from the rail into each child card */
+.wlpc-forest .wlpc-forest > .wlpc-branch::before {
+  content: ""; position: absolute; left: -16px; top: 20px;
+  width: 13px; height: 1px; background: rgba(142, 142, 147, .24);
+}
+
+.wlpc-node {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px; margin: 4px 0;
+  border: 1px solid rgba(142, 142, 147, .16); border-radius: 9px;
+  background: rgba(255, 255, 255, .015); cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.wlpc-node:hover { border-color: rgba(90, 127, 168, .6); background: rgba(90, 127, 168, .08); }
+.wlpc-node--flagged { border-color: rgba(255, 214, 10, .28); }
+.wlpc-node__dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.wlpc-node__pass { font-weight: 700; font-size: .72rem; color: var(--text); min-width: 24px; }
+.wlpc-node__name { font-weight: 500; color: var(--text); font-size: .84rem; }
+.wlpc-node__meta { color: var(--muted); font-size: .76rem; }
+.wlpc-node__tags { margin-left: auto; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.wlpc-tag { font-size: .66rem; padding: 1px 7px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
+.wlpc-tag--orphan { background: rgba(255, 159, 10, .16); color: #ff9f0a; }
+.wlpc-tag--bad { background: rgba(255, 69, 58, .16); color: #ff453a; }
+.wlpc-tag--dup { background: rgba(142, 142, 147, .2); color: #c7c7cc; }
+.wlpc-tag--warn { background: rgba(255, 214, 10, .16); color: #ffd60a; }
 
 /* ── Cell Culture map: tidy-timeline lane bands + vessel cards ─────────────── */
 .culture-lanes { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }

@@ -47,6 +47,7 @@
       seedDate: read(node, "SeedDate", ""),
       status: read(node, "Status", "active"),
       parentNodeId: read(node, "ParentNodeId", ""),
+      parentLabel: read(node, "ParentLabel", ""),
       // Provenance / source-tracking (drive the conflict + ground-truth warnings).
       sourceRecordType: read(node, "SourceRecordType", ""),
       rawSourceIdentifier: read(node, "RawSourceIdentifier", ""),
@@ -844,7 +845,13 @@
     // across donors. Cycle-guarded.
     var linked = 0;
     created.forEach(function (c) {
-      var pl = String(c.draft.parentLabel || "").replace(/\s+/g, " ").trim().toLowerCase();
+      var rawPl = String(c.draft.parentLabel || "").replace(/\s+/g, " ").trim();
+      // Remember the raw parent label the CSV declared, even if it can't be
+      // resolved — the family tree uses it to flag unlinked / cross-donor parents
+      // so messy imports are legible rather than silently orphaned.
+      var cnode0 = document.querySelector('.drop[data-node-id="' + c.nodeId + '"]');
+      if (cnode0 && rawPl) cnode0.dataset.cultureParentLabel = rawPl;
+      var pl = rawPl.toLowerCase();
       if (!pl) return;
       var match = null;
       for (var i = 0; i < created.length; i++) {
@@ -879,46 +886,99 @@
     }, 120);
   }
 
-  // The lineage tree: donor/eye-grouped parent→child genealogy.
+  // The lineage tree: a donor/eye-grouped parent→child family tree, rendered with
+  // card nodes + branch connectors + anomaly badges so a messy CSV import is
+  // legible — unlinked parents, cross-donor passages, backwards passages and
+  // likely duplicates are called out instead of silently flattened.
   function renderTree() {
     if (!buildView()) return;
     var body = view.querySelector("#wlpcGridBody");
     var all = allRecords();
     var shown = filteredRecords(all);
     updateSubtitle(all, shown);
-    var flat = LOGIC().flattenForest(LOGIC().buildLineageForest(shown));
-    if (!flat.length) {
+    var forest = LOGIC().buildLineageForest(shown);
+    if (!forest.length) {
       body.innerHTML = emptyMessage(all.length > 0);
       return;
     }
-    var records = all; // warnings computed against the full set
-    var html = "";
-    var lastGroup = null;
-    flat.forEach(function (item) {
-      var r = item.record;
-      if (item.depth === 0) {
-        var group = (String(r.donor || "").trim() || "Unknown donor") +
-          (r.eye && r.eye !== "unknown" ? " · " + r.eye : "");
-        if (group !== lastGroup) {
-          html += '<div class="wlpc-tree-group">' + esc(group) + "</div>";
-          lastGroup = group;
-        }
+    var flags = LOGIC().lineageFlags(all); // anomalies computed against the full set
+
+    // Group top-level roots by donor·eye, tallying vessels + issues per group.
+    var groups = [], byKey = {};
+    forest.forEach(function (root) {
+      var r = root.record;
+      var key = LOGIC().normalizeDonor(r.donor).toLowerCase() + "|" + String(r.eye || "").trim().toLowerCase();
+      var g = byKey[key];
+      if (!g) {
+        g = byKey[key] = {
+          label: (LOGIC().normalizeDonor(r.donor) || "Unknown donor") +
+            (r.eye && r.eye !== "unknown" ? " · " + String(r.eye).toUpperCase() : ""),
+          roots: [], count: 0, issues: 0,
+        };
+        groups.push(g);
       }
-      var indent = 12 + item.depth * 22;
-      var warnN = LOGIC().cultureWarnings(r, records).length;
-      var dot = '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' +
-        statusColor(r.status || "active") + ';margin-right:8px"></span>';
-      var connector = item.depth > 0 ? '<span style="color:#48484a">&#9492;&#9472; </span>' : "";
-      var meta = (r.passage !== "" && r.passage != null ? "P" + r.passage + " · " : "") +
-        esc(LOGIC().vesselTypeFromIcon(r.iconId)) + " · " + esc(r.status || "active");
-      var warn = warnN ? ' <span class="wlpc-warn">&#9888; ' + warnN + "</span>" : "";
-      html +=
-        '<div class="wlpc-tree-row" data-node-id="' + esc(r.nodeId) + '" style="padding-left:' + indent + 'px">' +
-        connector + dot + "<strong>" + esc(recordName(r)) + "</strong> " +
-        '<span style="color:#8e8e93">' + meta + "</span>" + warn + "</div>";
+      g.roots.push(root);
     });
+    function tally(node, g) {
+      g.count++;
+      var f = flags[String(node.record.nodeId)] || {};
+      var warnN = LOGIC().cultureWarnings(node.record, all).length;
+      if (f.orphan || f.crossDonor || f.passageBack || warnN) g.issues++;
+      (node.children || []).forEach(function (c) { tally(c, g); });
+    }
+    groups.forEach(function (g) { g.roots.forEach(function (root) { tally(root, g); }); });
+
+    var html = '<div class="wlpc-tree">';
+    groups.forEach(function (g) {
+      html +=
+        '<div class="wlpc-tree-group">' +
+          '<div class="wlpc-tree-group__hd">' +
+            '<span class="wlpc-tree-group__name">' + esc(g.label) + "</span>" +
+            '<span class="wlpc-tree-group__count">' + g.count + (g.count === 1 ? " vessel" : " vessels") + "</span>" +
+            (g.issues ? '<span class="wlpc-tree-group__issues" title="Records with an anomaly or that need attention">&#9888; ' +
+              g.issues + (g.issues === 1 ? " issue" : " issues") + "</span>" : "") +
+          "</div>" +
+          '<ul class="wlpc-forest wlpc-forest--root">' +
+            g.roots.map(function (root) { return renderTreeNode(root, flags, all); }).join("") +
+          "</ul>" +
+        "</div>";
+    });
+    html += "</div>";
     body.innerHTML = html;
-    Array.prototype.forEach.call(body.querySelectorAll("div[data-node-id]"), wireRowClick);
+    Array.prototype.forEach.call(body.querySelectorAll(".wlpc-node[data-node-id]"), wireRowClick);
+  }
+
+  // One card in the family tree, recursing into its children.
+  function renderTreeNode(node, flags, all) {
+    var r = node.record;
+    var f = flags[String(r.nodeId)] || {};
+    var warnN = LOGIC().cultureWarnings(r, all).length;
+    var status = r.status || "active";
+    var tags = "";
+    if (f.orphan) {
+      tags += '<span class="wlpc-tag wlpc-tag--orphan" title="' +
+        (f.orphanLabel ? "Declared parent “" + esc(f.orphanLabel) + "” was not found in this project" : "Parent link is broken") +
+        '">unlinked' + (f.orphanLabel ? ": " + esc(f.orphanLabel) : "") + "</span>";
+    }
+    if (f.crossDonor) tags += '<span class="wlpc-tag wlpc-tag--bad" title="Parent is a different donor/eye — a passage cannot cross tissues">cross-donor</span>';
+    if (f.passageBack) tags += '<span class="wlpc-tag wlpc-tag--bad" title="Passage number is not greater than its parent">passage &#8595;</span>';
+    if (warnN) tags += '<span class="wlpc-tag wlpc-tag--warn" title="Needs attention">&#9888; ' + warnN + "</span>";
+
+    var pass = r.passage !== "" && r.passage != null ? "P" + esc(r.passage) : "P?";
+    var meta = esc(LOGIC().vesselTypeFromIcon(r.iconId)) +
+      (r.seedDate ? " · " + esc(LOGIC().displayDate(r.seedDate)) : "");
+    var card =
+      '<div class="wlpc-node' + (tags ? " wlpc-node--flagged" : "") + '" data-node-id="' + esc(r.nodeId) + '" title="Open record">' +
+        '<span class="wlpc-node__dot" style="background:' + statusColor(status) + '"></span>' +
+        '<span class="wlpc-node__pass">' + pass + "</span>" +
+        '<span class="wlpc-node__name">' + esc(recordName(r)) + "</span>" +
+        '<span class="wlpc-node__meta">' + meta + "</span>" +
+        (tags ? '<span class="wlpc-node__tags">' + tags + "</span>" : "") +
+      "</div>";
+    var kids = node.children && node.children.length
+      ? '<ul class="wlpc-forest">' + node.children.map(function (c) { return renderTreeNode(c, flags, all); }).join("") + "</ul>"
+      : "";
+    return '<li class="wlpc-branch">' + card + kids + "</li>";
   }
 
   // Show the records view (and hide the canvas + palette) while the recorder

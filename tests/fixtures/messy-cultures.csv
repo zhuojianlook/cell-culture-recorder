@@ -1,0 +1,15 @@
+Donor,Eye,Passage,Vessel,Label,Seed Date,Medium,Status,Parent,Notes
+6769,OD,P0,Primary Tissue,6769 OD P0,2024-01-05,,active,,corneal tissue
+6769 ,od,0,cell line,6769 OD P0 dup,2024-01-05,DMEM/F12,Active,,duplicate-ish entry same passage
+Donor 6769,Right,P1,T75,6769 OD P1,1/12/2024,DMEM/F12,active,6769 OD P0,
+6769.0,R,P 2,T-75 flask,6769 OD P2 flask,19-Jan-2024,DMEM/F12 + 10% FBS,active,6769 OD P1,split A
+6769,OD,2,35mm dish,6769 OD P2 dish,2024-01-19,DMEM,frozen,6769 OD P1,split B
+6769,OD,,75cm2,6769 OD P3,2024-02-01,,contaminated,6769 OD P2 flask,missing passage number
+6769,OD,P3,T175,6769 OD P3 orphan,2024-02-03,,active,6769 OD P1x,parent label typo -> orphan
+7012,OS,P0,Primary Tissue,7012 OS P0,2024-02-10,,active,,
+7012,left,P1,T25,7012 OS P1,15/02/2024,mTeSR,active,7012 OS P0,
+7012,OS,P2,T75,7012 OS P2,2024-02-25,mTeSR,Active,6769 OD P1,WRONG cross-donor parent
+7012,OS,p3,dish,7012 OS P3,,mTeSR,discard,7012 OS P2,blank seed date
+,OD,P1,T75,mystery donor,2024-03-01,,active,,missing donor id
+8890,OS,P5,T75,8890 OS P5,2024-03-05,E8,active,8890 OS P4,parent never imported -> dangling
+6769,OD,P1,T75,6769 OD P1 back,2024-03-10,,active,6769 OD P2 flask,child passage < parent (P1 under P2)
