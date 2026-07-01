@@ -889,6 +889,16 @@ window.wlpPlaceVesselInBox = function (node) {
   try { if (node) openVesselStoreModal(node); } catch (e) { /* ignore */ }
 };
 
+// Inner SVG markup (paths only, no outer <svg>) of a vessel-type icon, so the
+// culture lineage timeline can size + tint it. The paths use currentColor, so a
+// coloured wrapper element tints the whole symbol by status.
+window.wlpIconInner = function (iconId) {
+  try {
+    var svg = getIconSvg(getIconDefinition(iconId || "", ""), "node");
+    return svg.replace(/^[\s\S]*?<svg[^>]*>/, "").replace(/<\/svg>\s*$/, "");
+  } catch (e) { return ""; }
+};
+
 let vesselStoreModal = null;
 let vesselStoreNode = null;
 let vesselStoreBoxIndex = -1;

@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.41", date: "2026-06-18", changes: [
+      "Cell Culture Records → Timeline: the lineage view is now a real timeline. Each donor·eye is a compact date axis; every vessel is drawn as its vessel-type symbol tinted by status, placed at its seed date and joined to its parent by a lineage curve. Click a symbol to open its record.",
+      "Uncertain ('?' best-guess) donor entries now keep that marker — they still reconcile to the right donor for grouping and lineage, but are flagged so you can see which identifications were a guess.",
+    ] },
     { version: "0.2.40", date: "2026-06-18", changes: [
       "CSV import is far more tolerant of real-world culture logs: it now parses compact YYYYMMDD dates (e.g. 20240828) and ordinal forms ('20th Aug 2025'), recognises 'ODOS' as both eyes (plus common typos), treats '?' and '-' as blank, and maps a 'Cell ID' column to the donor.",
       "Donor IDs that carry the eye ('045986OD', '2025-4392ODOS') are split automatically — the donor reconciles into one lineage and the eye is recovered even when there's no separate eye column.",

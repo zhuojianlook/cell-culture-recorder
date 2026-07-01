@@ -5297,6 +5297,22 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-tag--dup { background: rgba(142, 142, 147, .2); color: #c7c7cc; }
 .wlpc-tag--warn { background: rgba(255, 214, 10, .16); color: #ffd60a; }
 
+/* ── Cell Culture lineage TIMELINE (Records → Timeline view) ──────────────── */
+.wlpc-tl { padding: 2px 10px 20px; }
+.wlpc-tl-group { margin-top: 14px; }
+.wlpc-tl-group .wlpc-tree-group__hd { padding: 4px 4px 2px; }
+.wlpc-tl-svg { display: block; width: 100%; overflow: visible; }
+.wlpc-tl-edge { fill: none; stroke: rgba(142, 142, 147, .5); stroke-width: 1.4; }
+.wlpc-tl-axis { stroke: rgba(142, 142, 147, .28); stroke-width: 1; }
+.wlpc-tl-axlabel { fill: var(--muted); font-size: 11px; font-family: var(--font-display, sans-serif); }
+.wlpc-tl-node { cursor: pointer; }
+.wlpc-tl-ring { fill: var(--panel, #2c2c2e); stroke-width: 2; transition: filter 120ms ease; }
+.wlpc-tl-node:hover .wlpc-tl-ring { filter: brightness(1.4); }
+.wlpc-tl-pass { fill: var(--text); font-size: 12px; font-weight: 700; font-family: var(--font-display, sans-serif); }
+.wlpc-tl-date { fill: var(--muted); font-size: 10.5px; font-family: var(--font-display, sans-serif); }
+.wlpc-tl-guess { fill: #ff9f0a; font-size: 13px; font-weight: 800; font-family: var(--font-display, sans-serif); }
+.wlpc-tl-flag { fill: #ffd60a; stroke: var(--panel, #2c2c2e); stroke-width: 1; }
+
 /* ── Cell Culture map: tidy-timeline lane bands + vessel cards ─────────────── */
 .culture-lanes { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
 .culture-lane { position: absolute; left: 0; right: 0; border-top: 1px solid rgba(255,255,255,.05); }

@@ -358,8 +358,9 @@
   // Smith" is left untouched (no digit follows the prefix).
   function normalizeDonor(raw) {
     var s = str(raw).replace(/\s+/g, " ").trim();
-    s = s.replace(/^(donor|patient|subject|sample|case)\b[\s:#.\-]*(?=\d)/i, "");
-    s = s.replace(/^(\d+)\.0+$/, "$1");
+    s = s.replace(/^[?~*]+\s*(?=[\w])/, "");                                    // stray "not sure" markers: "?2025-4392" -> "2025-4392"
+    s = s.replace(/^(donor|patient|subject|sample|case)\b[\s:#.\-]*(?=\d)/i, ""); // descriptor prefix
+    s = s.replace(/^(\d+)\.0+$/, "$1");                                          // excel ".0" float
     return s.trim();
   }
 

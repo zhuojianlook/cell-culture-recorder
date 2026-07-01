@@ -598,7 +598,7 @@
           '<input type="file" id="wlpcImportFile" accept=".csv,text/csv" style="display:none">' +
           '<div class="wlpc-seg">' +
             '<button type="button" id="wlpcModeTable">Table</button>' +
-            '<button type="button" id="wlpcModeTree">Tree</button>' +
+            '<button type="button" id="wlpcModeTree">Timeline</button>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -886,10 +886,11 @@
     }, 120);
   }
 
-  // The lineage tree: a donor/eye-grouped parent→child family tree, rendered with
-  // card nodes + branch connectors + anomaly badges so a messy CSV import is
-  // legible — unlinked parents, cross-donor passages, backwards passages and
-  // likely duplicates are called out instead of silently flattened.
+  // The lineage as a per-donor·eye TIMELINE: each donor gets its own compact
+  // horizontal date axis, vessels drawn as their vessel-type SYMBOL (tinted by
+  // status) positioned by seed date and joined by passage lineage. Uncertain
+  // ("?"/best-guess) donor ids get a marker; anomalies (unlinked / cross-donor /
+  // passage↓) are flagged. Click a symbol to open its record.
   function renderTree() {
     if (!buildView()) return;
     var body = view.querySelector("#wlpcGridBody");
@@ -903,7 +904,6 @@
     }
     var flags = LOGIC().lineageFlags(all); // anomalies computed against the full set
 
-    // Group top-level roots by donor·eye, tallying vessels + issues per group.
     var groups = [], byKey = {};
     forest.forEach(function (root) {
       var r = root.record;
@@ -913,72 +913,105 @@
         g = byKey[key] = {
           label: (LOGIC().normalizeDonor(r.donor) || "Unknown donor") +
             (r.eye && r.eye !== "unknown" ? " · " + String(r.eye).toUpperCase() : ""),
-          roots: [], count: 0, issues: 0,
+          roots: [], vessels: [], issues: 0,
         };
         groups.push(g);
       }
       g.roots.push(root);
     });
-    function tally(node, g) {
-      g.count++;
-      var f = flags[String(node.record.nodeId)] || {};
-      var warnN = LOGIC().cultureWarnings(node.record, all).length;
-      if (f.orphan || f.crossDonor || f.passageBack || warnN) g.issues++;
-      (node.children || []).forEach(function (c) { tally(c, g); });
-    }
-    groups.forEach(function (g) { g.roots.forEach(function (root) { tally(root, g); }); });
+    groups.forEach(function (g) {
+      (function collect(nodes) { nodes.forEach(function (n) { g.vessels.push(n.record); collect(n.children || []); }); })(g.roots);
+      g.vessels.forEach(function (r) {
+        var f = flags[String(r.nodeId)] || {};
+        if (f.orphan || f.crossDonor || f.passageBack || LOGIC().cultureWarnings(r, all).length) g.issues++;
+      });
+    });
 
-    var html = '<div class="wlpc-tree">';
+    var html = '<div class="wlpc-tl">';
     groups.forEach(function (g) {
       html +=
-        '<div class="wlpc-tree-group">' +
+        '<div class="wlpc-tl-group">' +
           '<div class="wlpc-tree-group__hd">' +
             '<span class="wlpc-tree-group__name">' + esc(g.label) + "</span>" +
-            '<span class="wlpc-tree-group__count">' + g.count + (g.count === 1 ? " vessel" : " vessels") + "</span>" +
+            '<span class="wlpc-tree-group__count">' + g.vessels.length + (g.vessels.length === 1 ? " vessel" : " vessels") + "</span>" +
             (g.issues ? '<span class="wlpc-tree-group__issues" title="Records with an anomaly or that need attention">&#9888; ' +
               g.issues + (g.issues === 1 ? " issue" : " issues") + "</span>" : "") +
           "</div>" +
-          '<ul class="wlpc-forest wlpc-forest--root">' +
-            g.roots.map(function (root) { return renderTreeNode(root, flags, all); }).join("") +
-          "</ul>" +
+          groupTimelineSvg(g.vessels, flags, all) +
         "</div>";
     });
     html += "</div>";
     body.innerHTML = html;
-    Array.prototype.forEach.call(body.querySelectorAll(".wlpc-node[data-node-id]"), wireRowClick);
+    Array.prototype.forEach.call(body.querySelectorAll("[data-node-id]"), wireRowClick);
   }
 
-  // One card in the family tree, recursing into its children.
-  function renderTreeNode(node, flags, all) {
-    var r = node.record;
-    var f = flags[String(r.nodeId)] || {};
-    var warnN = LOGIC().cultureWarnings(r, all).length;
-    var status = r.status || "active";
-    var tags = "";
-    if (f.orphan) {
-      tags += '<span class="wlpc-tag wlpc-tag--orphan" title="' +
-        (f.orphanLabel ? "Declared parent “" + esc(f.orphanLabel) + "” was not found in this project" : "Parent link is broken") +
-        '">unlinked' + (f.orphanLabel ? ": " + esc(f.orphanLabel) : "") + "</span>";
-    }
-    if (f.crossDonor) tags += '<span class="wlpc-tag wlpc-tag--bad" title="Parent is a different donor/eye — a passage cannot cross tissues">cross-donor</span>';
-    if (f.passageBack) tags += '<span class="wlpc-tag wlpc-tag--bad" title="Passage number is not greater than its parent">passage &#8595;</span>';
-    if (warnN) tags += '<span class="wlpc-tag wlpc-tag--warn" title="Needs attention">&#9888; ' + warnN + "</span>";
+  function shortDate(s) { var m = String(s || "").match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? (m[2] + "/" + m[3] + "/" + m[1].slice(2)) : ""; }
 
-    var pass = r.passage !== "" && r.passage != null ? "P" + esc(r.passage) : "P?";
-    var meta = esc(LOGIC().vesselTypeFromIcon(r.iconId)) +
-      (r.seedDate ? " · " + esc(LOGIC().displayDate(r.seedDate)) : "");
-    var card =
-      '<div class="wlpc-node' + (tags ? " wlpc-node--flagged" : "") + '" data-node-id="' + esc(r.nodeId) + '" title="Open record">' +
-        '<span class="wlpc-node__dot" style="background:' + statusColor(status) + '"></span>' +
-        '<span class="wlpc-node__pass">' + pass + "</span>" +
-        '<span class="wlpc-node__name">' + esc(recordName(r)) + "</span>" +
-        '<span class="wlpc-node__meta">' + meta + "</span>" +
-        (tags ? '<span class="wlpc-node__tags">' + tags + "</span>" : "") +
-      "</div>";
-    var kids = node.children && node.children.length
-      ? '<ul class="wlpc-forest">' + node.children.map(function (c) { return renderTreeNode(c, flags, all); }).join("") + "</ul>"
-      : "";
-    return '<li class="wlpc-branch">' + card + kids + "</li>";
+  // Render one donor·eye group's vessels as an SVG date-axis timeline.
+  function groupTimelineSvg(vessels, flags, all) {
+    var W = 1000, LEFT = 100, RIGHT = 968, TOP = 34, LANE = 68, NR = 17;
+    var msOf = function (s) { var t = Date.parse(s); return isNaN(t) ? NaN : t; };
+    vessels.forEach(function (v) { v._ms = msOf(v.seedDate); });
+    var dated = vessels.filter(function (v) { return !isNaN(v._ms); });
+    var minMs = dated.length ? Math.min.apply(null, dated.map(function (v) { return v._ms; })) : 0;
+    var maxMs = dated.length ? Math.max.apply(null, dated.map(function (v) { return v._ms; })) : 0;
+    function xOf(v) {
+      if (isNaN(v._ms)) return 52;                        // undated vessels: a zone left of the axis
+      if (maxMs === minMs) return (LEFT + RIGHT) / 2;
+      return LEFT + (v._ms - minMs) / (maxMs - minMs) * (RIGHT - LEFT);
+    }
+    vessels.sort(function (a, b) { return (xOf(a) - xOf(b)) || ((Number(a.passage) || 0) - (Number(b.passage) || 0)); });
+    var laneLastX = [];
+    vessels.forEach(function (v) {
+      var x = xOf(v), lane = 0;
+      for (; lane < laneLastX.length; lane++) { if (laneLastX[lane] <= x - (NR * 2 + 12)) break; }
+      laneLastX[lane] = x; v._x = x; v._y = TOP + lane * LANE;
+    });
+    var H = TOP + Math.max(1, laneLastX.length) * LANE - 6;
+
+    var byId = {}; vessels.forEach(function (v) { byId[v.nodeId] = v; });
+    var edges = "";
+    vessels.forEach(function (v) {
+      var p = v.parentNodeId && byId[v.parentNodeId];
+      if (!p) return;
+      var mx = (p._x + v._x) / 2;
+      edges += '<path class="wlpc-tl-edge" d="M' + p._x.toFixed(1) + " " + p._y + " C" + mx.toFixed(1) + " " + p._y + " " + mx.toFixed(1) + " " + v._y + " " + v._x.toFixed(1) + " " + v._y + '"/>';
+    });
+
+    var axis = "";
+    if (dated.length && maxMs > minMs) {
+      var yb = H - 2;
+      axis = '<line class="wlpc-tl-axis" x1="' + LEFT + '" y1="' + yb + '" x2="' + RIGHT + '" y2="' + yb + '"/>' +
+        '<text class="wlpc-tl-axlabel" x="' + LEFT + '" y="' + (yb - 4) + '" text-anchor="start">' + esc(shortDate(new Date(minMs).toISOString().slice(0, 10))) + "</text>" +
+        '<text class="wlpc-tl-axlabel" x="' + RIGHT + '" y="' + (yb - 4) + '" text-anchor="end">' + esc(shortDate(new Date(maxMs).toISOString().slice(0, 10))) + "</text>";
+    }
+
+    var nodes = "";
+    vessels.forEach(function (v) {
+      var color = statusColor(v.status || "active");
+      var f = flags[v.nodeId] || {};
+      var uncertain = /^\s*[?~*]/.test(String(v.donor || ""));
+      var inner = (typeof window.wlpIconInner === "function") ? window.wlpIconInner(v.iconId) : "";
+      var pass = (v.passage !== "" && v.passage != null) ? "P" + esc(v.passage) : "P?";
+      var flagged = f.orphan || f.crossDonor || f.passageBack;
+      var t = [recordName(v), pass, LOGIC().vesselTypeFromIcon(v.iconId), v.status || "active"];
+      if (uncertain) t.push("best guess (source marked uncertain)");
+      if (f.orphan) t.push("unlinked" + (f.orphanLabel ? ": " + f.orphanLabel : ""));
+      if (f.crossDonor) t.push("cross-donor");
+      if (f.passageBack) t.push("passage backwards");
+      nodes +=
+        '<g class="wlpc-tl-node' + (flagged ? " is-flagged" : "") + '" data-node-id="' + esc(v.nodeId) + '" transform="translate(' + v._x.toFixed(1) + "," + v._y + ')">' +
+          "<title>" + esc(t.join(" · ")) + "</title>" +
+          '<circle class="wlpc-tl-ring" r="' + NR + '" style="stroke:' + color + '"/>' +
+          '<g transform="translate(-13,-13) scale(0.40625)" style="color:' + color + '">' + inner + "</g>" +
+          '<text class="wlpc-tl-pass" y="-' + (NR + 4) + '" text-anchor="middle">' + pass + "</text>" +
+          (v.seedDate ? '<text class="wlpc-tl-date" y="' + (NR + 14) + '" text-anchor="middle">' + esc(shortDate(v.seedDate)) + "</text>" : "") +
+          (uncertain ? '<text class="wlpc-tl-guess" x="' + (NR - 1) + '" y="-' + (NR - 5) + '">?</text>' : "") +
+          (flagged ? '<circle class="wlpc-tl-flag" cx="' + (NR - 3) + '" cy="-' + (NR - 3) + '" r="4.5"/>' : "") +
+        "</g>";
+    });
+
+    return '<svg class="wlpc-tl-svg" viewBox="0 0 ' + W + " " + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + axis + edges + nodes + "</svg>";
   }
 
   // Show the records view (and hide the canvas + palette) while the recorder
