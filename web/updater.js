@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.48", date: "2026-07-01", changes: [
+      "Ground-truth conflicts: the eye-bank PDF is no longer assumed always-right. When the PDF and the spreadsheet disagree on a donor field (deceased date, endothelial density, age, sex), the Needs-confirmation panel now shows BOTH values — the PDF one marked 📄 — and lets you choose which is correct. This surfaced real spreadsheet errors (ages that were formula artifacts like averages or ‘#DIV/0!’, and a ‘deceased date’ that held a duration). Your choice is remembered and re-fused onto the vessel.",
+    ] },
     { version: "0.2.47", date: "2026-07-01", changes: [
       "Timezone correctness: the eye-bank PDFs report US time (each states Central or Eastern), but the lab works in Singapore time. All US-sourced date-times (death, preservation, ocular cooling, release) are now converted to Asia/Singapore, DST-correct per each form's stated zone — which moves 22 of 27 death dates to the correct Singapore calendar day. The original US date-time and zone are kept for reference (hover the “✓ eye-bank” chip).",
     ] },

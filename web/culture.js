@@ -671,13 +671,45 @@
   // links, or dismisses each; confirming fuses ground truth onto the vessel(s).
   var reconcileCollapsed = false;
   var donorsHydrateTried = false;
+  // The effective value for a ground-truth field: the PDF value by default, or the
+  // spreadsheet ("log") value if the user chose it for this donor.
+  function gtValue(d, field) {
+    var log = (d.chosen && d.chosen[field]) === "log";
+    if (field === "deceased") return log ? d.deceasedLog : d.deceased;
+    if (field === "endothelial") return log ? d.ecdLog : d.endothelial;
+    if (field === "age") return log ? d.ageLog : d.age;
+    if (field === "sex") return log ? d.sexLog : d.sex;
+    return "";
+  }
+  // Fields where the PDF and the spreadsheet disagree — the user picks which wins.
+  function donorConflicts(d) {
+    if (!d || !d.gtSource) return [];
+    var out = [];
+    var ip = function (s) { var m = String(s == null ? "" : s).match(/\d+/); return m ? m[0] : ""; };
+    // strip a trailing US zone abbreviation ("… 1450 EDT") before coercing, so a
+    // log that holds the same instant as the PDF (just US-stamped) isn't flagged.
+    var logRaw = String(d.deceasedLog || "").replace(/\s+[A-Za-z]{2,5}$/, "").trim();
+    var logD = logRaw ? LOGIC().coerceDate(logRaw) : "";
+    var pdfUS = String(d.deathUS || "").slice(0, 10);
+    if (d.deceasedLog && pdfUS && logD !== pdfUS)
+      out.push({ field: "deceased", label: "Deceased date", pdf: (shortDate(d.deceased) || d.deceased), log: (shortDate(d.deceasedLog) || d.deceasedLog) });
+    if (d.ecdLog && d.endothelial && ip(d.ecdLog) !== ip(d.endothelial))
+      out.push({ field: "endothelial", label: "Endothelial density", pdf: d.endothelial, log: d.ecdLog });
+    if (d.ageLog && d.age && ip(d.ageLog) !== ip(d.age))
+      out.push({ field: "age", label: "Donor age", pdf: d.age, log: d.ageLog });
+    if (d.sexLog && d.sex && String(d.sexLog).charAt(0).toUpperCase() !== String(d.sex).charAt(0).toUpperCase())
+      out.push({ field: "sex", label: "Donor sex", pdf: d.sex, log: d.sexLog });
+    return out;
+  }
   function donorGtBits(d) {
     var b = [];
     if (d.dissociation) b.push("dissoc " + shortDate(d.dissociation));
-    if (d.deceased) b.push("deceased " + shortDate(d.deceased));
+    var dec = gtValue(d, "deceased");
+    if (dec) b.push("deceased " + (shortDate(dec) || dec));
     if (d.cod) b.push(d.cod);
     if (d.seeding) b.push("seeding " + d.seeding);
-    if (d.age) b.push(d.age + (d.sex ? " " + d.sex : ""));
+    var age = gtValue(d, "age");
+    if (age) b.push(age + (gtValue(d, "sex") ? " " + gtValue(d, "sex") : ""));
     if (d.serology) b.push(d.serology);
     return b.join(" · ");
   }
@@ -713,7 +745,8 @@
     var rec = LOGIC().reconcileDonors(active, vesselRecords);
     var fuzzy = rec.fuzzy;
     var confirmedCount = donorsAll.filter(function (d) { return d.confirmedVessel; }).length;
-    var needCount = fuzzy.length + orphans.length;
+    var conflicts = donorsAll.filter(function (d) { return !d._dismissed && donorConflicts(d).length; });
+    var needCount = fuzzy.length + orphans.length + conflicts.length;
 
     box.style.display = "";
     if (reconcileCollapsed) {
@@ -734,6 +767,30 @@
         '<span class="wlpc-rc-sub">' + donorsAll.length + ' donor records · ' + confirmedCount + ' confirmed</span>' +
         '<span class="wlpc-rc-chev">▾ hide</span>' +
       '</div>';
+
+    // Section 0 — ground-truth conflicts: the PDF and the spreadsheet disagree on a
+    // field. Show both (PDF marked) and let the user choose which is correct.
+    if (conflicts.length) {
+      html += '<div class="wlpc-rc-sec"><div class="wlpc-rc-sec-hd">Ground-truth conflicts — PDF vs spreadsheet, choose which is correct (' + conflicts.length + ')</div>';
+      conflicts.slice(0, 20).forEach(function (d) {
+        var idx = donorsAll.indexOf(d);
+        html += '<div class="wlpc-rc-row">' +
+          '<div class="wlpc-rc-main"><span class="wlpc-rc-id">' + esc(d.donor) + '</span>' +
+            (d.eye ? ' <span class="wlpc-rc-eye">' + esc(String(d.eye).toUpperCase()) + '</span>' : '') +
+            gtSourceChip(d) + '</div>' +
+          '<div class="wlpc-rc-cflist">' +
+            donorConflicts(d).map(function (c) {
+              var pick = (d.chosen && d.chosen[c.field]) || "pdf";
+              return '<div class="wlpc-rc-cf"><span class="wlpc-rc-cf-lbl">' + esc(c.label) + '</span>' +
+                '<button type="button" class="wlpc-rc-cf-opt' + (pick === "pdf" ? " is-on" : "") + '" data-rc-choose="' + idx + '" data-rc-field="' + esc(c.field) + '" data-rc-which="pdf">📄 ' + esc(String(c.pdf)) + '</button>' +
+                '<button type="button" class="wlpc-rc-cf-opt' + (pick === "log" ? " is-on" : "") + '" data-rc-choose="' + idx + '" data-rc-field="' + esc(c.field) + '" data-rc-which="log">log: ' + esc(String(c.log)) + '</button>' +
+                '</div>';
+            }).join("") +
+          '</div></div>';
+      });
+      if (conflicts.length > 20) html += '<div class="wlpc-rc-more">…and ' + (conflicts.length - 20) + ' more</div>';
+      html += '</div>';
+    }
 
     // Section 1 — ambiguous donor↔vessel matches (confirm which vessel it is).
     if (fuzzy.length) {
@@ -804,7 +861,14 @@
   function wireReconcile(box) {
     box.onclick = function (e) {
       var t = e.target;
+      // the choose buttons contain an emoji/text span — walk up to the button
+      if (t.getAttribute && t.getAttribute("data-rc-choose") == null && t.closest) {
+        var btn = t.closest("[data-rc-choose]");
+        if (btn) t = btn;
+      }
       if (t.closest && t.closest("[data-rc-toggle]")) { reconcileCollapsed = !reconcileCollapsed; renderReconcilePanel(); return; }
+      var ch = t.getAttribute && t.getAttribute("data-rc-choose");
+      if (ch != null) { chooseGt(parseInt(ch, 10), t.getAttribute("data-rc-field"), t.getAttribute("data-rc-which")); return; }
       var link = t.getAttribute && t.getAttribute("data-rc-link");
       if (link != null) { confirmDonorMatch(parseInt(link, 10), t.getAttribute("data-rc-vessel")); return; }
       var dis = t.getAttribute && t.getAttribute("data-rc-dismiss");
@@ -836,6 +900,19 @@
     if (typeof window.wlpSaveCultureDonors === "function") window.wlpSaveCultureDonors(donorsAll);
     renderView();
   }
+  // Choose the ground-truth source for one field of a donor (pdf | log). Re-fuses
+  // onto the vessels if the donor is already confirmed. Persisted with the donor.
+  function chooseGt(idx, field, which) {
+    var donorsAll = (typeof window.wlpLoadCultureDonors === "function") ? (window.wlpLoadCultureDonors() || []) : [];
+    var d = donorsAll[idx];
+    if (!d || !field) return;
+    d.chosen = d.chosen || {};
+    d.chosen[field] = which;
+    if (typeof window.wlpSaveCultureDonors === "function") window.wlpSaveCultureDonors(donorsAll);
+    if (d.confirmedVessel) fuseDonorOntoVessels(d, d.confirmedVessel);
+    renderView();
+    showImportStatus("Ground truth for " + d.donor + " · " + field + " → " + (which === "log" ? "spreadsheet" : "eye-bank PDF") + ".", false);
+  }
   // Fuse a donor's ground truth onto every vessel with the confirmed donor id:
   // the dissociation date (if the vessel lacks one) and a compact GT note so the
   // deceased date / seeding outcome aren't lost.
@@ -845,11 +922,13 @@
     nodes.forEach(function (n) {
       if (d.dissociation && !read(n, "DissociationDate", "")) { write(n, "DissociationDate", d.dissociation); changed++; }
       var gt = [];
-      if (d.deceased) gt.push("deceased " + d.deceased);
+      var dec = gtValue(d, "deceased");
+      if (dec) gt.push("deceased " + dec);
       if (d.cod) gt.push("COD " + d.cod);
       if (d.serology) gt.push(d.serology);
       if (d.seeding) gt.push("seeding " + d.seeding);
-      if (d.age) gt.push("age " + d.age + (d.sex || ""));
+      var age = gtValue(d, "age");
+      if (age) gt.push("age " + age + (gtValue(d, "sex") || ""));
       if (gt.length) {
         var note = read(n, "Notes", "");
         if (note.indexOf("[donor GT:") < 0) { write(n, "Notes", (note ? note + " " : "") + "[donor GT: " + gt.join(", ") + "]"); changed++; }
@@ -1174,6 +1253,8 @@
         cod: col(r, "causeofdeath"), deathTime: col(r, "deathdatetime"),
         sourceTz: col(r, "sourcetimezone"), deathUS: col(r, "deathlocalus"),
         serology: col(r, "serology"), gtSource: col(r, "groundtruthsource"),
+        deceasedLog: col(r, "deceaseddatelog"), ecdLog: col(r, "endothelialdensitylog"),
+        ageLog: col(r, "agelog"), sexLog: col(r, "sexlog"),
         allFields: col(r, "allfields")
       });
     }
