@@ -682,8 +682,12 @@
     return b.join(" · ");
   }
   // A small "eye-bank verified" chip when the donor's ground truth came from a PDF.
+  // Dates are stored Singapore-local; the tooltip shows the original US date-time.
   function gtSourceChip(d) {
-    return d && d.gtSource ? ' <span class="wlpc-rc-src" title="Ground truth from ' + esc(d.gtSource) + '">✓ eye-bank</span>' : "";
+    if (!d || !d.gtSource) return "";
+    var t = "Ground truth from " + d.gtSource;
+    if (d.deathUS) t += " · dates converted to Singapore time (death recorded " + d.deathUS + " " + (d.sourceTz || "US") + ")";
+    return ' <span class="wlpc-rc-src" title="' + esc(t) + '">✓ eye-bank</span>';
   }
   function renderReconcilePanel() {
     if (!view) return;
@@ -1168,6 +1172,7 @@
         seeding: col(r, "seedingsuccess"), age: col(r, "age"), sex: col(r, "sex"),
         ethnicity: col(r, "ethnicity"), endothelial: col(r, "endothelialdensity"),
         cod: col(r, "causeofdeath"), deathTime: col(r, "deathdatetime"),
+        sourceTz: col(r, "sourcetimezone"), deathUS: col(r, "deathlocalus"),
         serology: col(r, "serology"), gtSource: col(r, "groundtruthsource"),
         allFields: col(r, "allfields")
       });

@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.47", date: "2026-07-01", changes: [
+      "Timezone correctness: the eye-bank PDFs report US time (each states Central or Eastern), but the lab works in Singapore time. All US-sourced date-times (death, preservation, ocular cooling, release) are now converted to Asia/Singapore, DST-correct per each form's stated zone — which moves 22 of 27 death dates to the correct Singapore calendar day. The original US date-time and zone are kept for reference (hover the “✓ eye-bank” chip).",
+    ] },
     { version: "0.2.46", date: "2026-07-01", changes: [
       "Donor ground truth now includes the eye-bank Tissue Report PDFs, as the authoritative source: precise date-time of death, cause of death, per-eye endothelial density, age/sex/race and serology override the spreadsheet-derived values where they differ (they agreed on 26/26 death dates and corrected one). Donor records backed by a PDF are marked “✓ eye-bank” in the Needs confirmation panel, and confirming such a match fuses that ground truth onto the vessel(s).",
       "Re-importing a donor CSV now replaces the registry (it's a full consolidation) instead of appending duplicate rows, and preserves your existing confirm / dismiss decisions by donor id.",
