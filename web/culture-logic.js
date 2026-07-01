@@ -779,8 +779,81 @@
     return bits.join(" · ");
   }
 
+  // ─── Donor ground-truth reconciliation ─────────────────────────────────────
+  // Derive a matchable identity from a raw donor id in any of the source formats:
+  //   "2025-3468", "LEI-25-036860", "?20250524 (3468) OD", "2024-6590RC"
+  //   (RC/LC = right/left cornea = OD/OS), "045986OD", "34889OS".
+  // Returns { core, eye, uncertain, aliases[] }. `aliases` includes the year-
+  // stripped numeric so a bare cross-ref ("3468") links to a "2025-3468" vessel.
+  function donorIdentity(raw) {
+    var original = str(raw).trim();
+    var aliases = {};
+    var uncertain = /^[?~*]/.test(original);
+    var lo = original.toLowerCase().replace(/^[?~*]+/, "").trim();
+    if (lo) aliases[lo] = true;
+    var paren = "";
+    var m = lo.match(/\((\d{3,})\)/);            // parenthetical cross-ref: (3468)
+    if (m) { paren = m[1]; aliases[paren] = true; }
+    lo = lo.replace(/\([^)]*\)/g, " ").trim();
+    var eye = "unknown";                          // trailing eye / cornea-side marker
+    m = lo.match(/(odos|osod|rc|lc|od|os|ou)(?:cn)?$/);
+    if (m) {
+      var e = m[1] === "rc" ? "od" : (m[1] === "lc" ? "os" : m[1]);
+      eye = coerceEye(e);
+      lo = lo.slice(0, m.index).trim();
+    }
+    var stripped = lo.replace(/^(lei-\d+-|lwvi-\d+-|csk[-\s]*)/, "");  // lab prefixes
+    var num = stripped.replace(/[^a-z0-9]/g, "").replace(/^0+(?=\d)/, "");
+    if (num) aliases[num] = true;
+    var noYear = num.replace(/^(20\d{2})(?=\d)/, "");  // "20253468" -> "3468"
+    if (noYear && noYear !== num) aliases[noYear] = true;
+    var full = lo.replace(/[^a-z0-9]/g, "");
+    if (full) aliases[full] = true;
+    var core = paren || noYear || num;
+    if (core) aliases[core] = true;
+    return { core: core, eye: eye, uncertain: uncertain, aliases: Object.keys(aliases) };
+  }
+
+  // Reconcile donor-metadata records against vessel records. Each record is
+  // {donor, eye, ...}. A donor is MATCHED when exactly one vessel-donor shares its
+  // id/core, FUZZY when several do (leading-zero / best-guess / year variants —
+  // the user confirms), and lands in donorsWithoutVessel when none do. The reverse
+  // gap (a cultured vessel with no donor record) is vesselsWithoutDonor.
+  function reconcileDonors(donorRecords, vesselRecords) {
+    donorRecords = donorRecords || []; vesselRecords = vesselRecords || [];
+    var byCore = {}, byFull = {}, vesselDonorSet = {};
+    vesselRecords.forEach(function (v) {
+      var raw = str(v.donor).trim();
+      if (!raw) return;
+      vesselDonorSet[raw] = true;
+      var id = donorIdentity(raw);
+      var full = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (full) byFull[full] = raw;
+      id.aliases.forEach(function (a) { (byCore[a] = byCore[a] || {})[raw] = true; });
+    });
+    var matched = [], fuzzy = [], donorsWithoutVessel = [], claimed = {};
+    donorRecords.forEach(function (d) {
+      var raw = str(d.donor).trim();
+      var id = donorIdentity(raw);
+      var full = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+      var hits = {};
+      if (full && byFull[full]) hits[byFull[full]] = true;
+      id.aliases.forEach(function (a) {
+        if (byCore[a]) Object.keys(byCore[a]).forEach(function (vd) { hits[vd] = true; });
+      });
+      var hitList = Object.keys(hits);
+      if (hitList.length === 0) { donorsWithoutVessel.push(d); }
+      else if (hitList.length === 1) { matched.push({ donor: d, vesselDonors: hitList }); claimed[hitList[0]] = true; }
+      else { fuzzy.push({ donor: d, candidates: hitList }); hitList.forEach(function (vd) { claimed[vd] = true; }); }
+    });
+    var vesselsWithoutDonor = Object.keys(vesselDonorSet).filter(function (vd) { return !claimed[vd]; });
+    return { matched: matched, fuzzy: fuzzy, donorsWithoutVessel: donorsWithoutVessel, vesselsWithoutDonor: vesselsWithoutDonor };
+  }
+
   return {
     EVENT_TYPES: EVENT_TYPES,
+    donorIdentity: donorIdentity,
+    reconcileDonors: reconcileDonors,
     parseEvents: parseEvents,
     statusFromEvent: statusFromEvent,
     sortEvents: sortEvents,

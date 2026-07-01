@@ -612,6 +612,7 @@
         '<label class="wlpc-check"><input type="checkbox" id="wlpcNeedsAttn"> Needs attention</label>' +
       "</div>" +
       '<div id="wlpcImportStatus" class="wlpc-banner wlpc-banner--info" style="display:none"></div>' +
+      '<div id="wlpcReconcile" class="wlpc-reconcile" style="display:none"></div>' +
       '<div id="wlpcGridBody"></div>';
     workspace.appendChild(view);
     view.querySelector("#wlpcSearch").addEventListener("input", function (e) { filterQuery = e.target.value; renderView(); });
@@ -642,6 +643,7 @@
     if (r) r.classList.toggle("is-active", viewMode === "tree");
   }
   function renderView() {
+    try { renderReconcilePanel(); } catch (e) { /* ignore */ }
     if (viewMode === "tree") renderTree();
     else renderGrid();
   }
@@ -660,6 +662,210 @@
       : '<p class="wlpc-empty">No vessels yet.<br>Switch to the <strong>Cell Culture</strong> tab, drop a flask/dish/cell line ' +
         "onto the timeline, then double-click it to add its record, or use <strong>Import CSV</strong>.</p>";
   }
+
+  // ─── "Needs confirmation" region ───────────────────────────────────────────
+  // Surfaces the reconciliation gaps between the donor ground-truth registry and
+  // the cultured vessels: donor↔vessel matches that are ambiguous (fuzzy), vessels
+  // whose declared lineage parent never resolved (orphans), and — collapsed —
+  // donors with no vessel and vessels with no donor record. The user confirms,
+  // links, or dismisses each; confirming fuses ground truth onto the vessel(s).
+  var reconcileCollapsed = false;
+  var donorsHydrateTried = false;
+  function donorGtBits(d) {
+    var b = [];
+    if (d.dissociation) b.push("dissoc " + shortDate(d.dissociation));
+    if (d.deceased) b.push("deceased " + shortDate(d.deceased));
+    if (d.seeding) b.push("seeding " + d.seeding);
+    if (d.age) b.push(d.age + (d.sex ? d.sex : "") + "y");
+    return b.join(" · ");
+  }
+  function renderReconcilePanel() {
+    if (!view) return;
+    var box = view.querySelector("#wlpcReconcile");
+    if (!box) return;
+    var donorsAll = (typeof window.wlpLoadCultureDonors === "function") ? (window.wlpLoadCultureDonors() || []) : [];
+    // If the registry looks empty, pull it from the sidecar once and re-render
+    // when the donors arrive (survives app restarts — the initial render happens
+    // before the async hydration completes).
+    if (!donorsAll.length && !donorsHydrateTried && typeof window.wlpEnsureDonorsHydrated === "function") {
+      donorsHydrateTried = true;
+      Promise.resolve(window.wlpEnsureDonorsHydrated()).then(function (n) {
+        if (n) renderReconcilePanel();
+      }).catch(function () { /* ignore */ });
+    }
+    var vesselRecords = allRecords();
+    var flags = LOGIC().lineageFlags(vesselRecords);
+    var orphans = vesselRecords.filter(function (r) { return (flags[String(r.nodeId)] || {}).orphan; });
+
+    if (!donorsAll.length && !orphans.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+
+    var active = donorsAll.filter(function (d) { return !d._dismissed && !d.confirmedVessel; });
+    var rec = LOGIC().reconcileDonors(active, vesselRecords);
+    var fuzzy = rec.fuzzy;
+    var confirmedCount = donorsAll.filter(function (d) { return d.confirmedVessel; }).length;
+    var needCount = fuzzy.length + orphans.length;
+
+    box.style.display = "";
+    if (reconcileCollapsed) {
+      box.innerHTML =
+        '<div class="wlpc-rc-hd" data-rc-toggle="1">' +
+          '<span class="wlpc-rc-title">Needs confirmation</span>' +
+          '<span class="wlpc-rc-count' + (needCount ? " is-warn" : " is-ok") + '">' + needCount + '</span>' +
+          '<span class="wlpc-rc-chev">▸ show</span>' +
+        '</div>';
+      wireReconcile(box);
+      return;
+    }
+
+    var html =
+      '<div class="wlpc-rc-hd" data-rc-toggle="1">' +
+        '<span class="wlpc-rc-title">Needs confirmation</span>' +
+        '<span class="wlpc-rc-count' + (needCount ? " is-warn" : " is-ok") + '">' + needCount + '</span>' +
+        '<span class="wlpc-rc-sub">' + donorsAll.length + ' donor records · ' + confirmedCount + ' confirmed</span>' +
+        '<span class="wlpc-rc-chev">▾ hide</span>' +
+      '</div>';
+
+    // Section 1 — ambiguous donor↔vessel matches (confirm which vessel it is).
+    if (fuzzy.length) {
+      html += '<div class="wlpc-rc-sec"><div class="wlpc-rc-sec-hd">Confirm donor ↔ vessel matches (' + fuzzy.length + ')</div>';
+      fuzzy.slice(0, 20).forEach(function (f) {
+        var idx = donorsAll.indexOf(f.donor);
+        var gt = donorGtBits(f.donor);
+        html += '<div class="wlpc-rc-row">' +
+          '<div class="wlpc-rc-main"><span class="wlpc-rc-id">' + esc(f.donor.donor) + '</span>' +
+            (f.donor.eye ? ' <span class="wlpc-rc-eye">' + esc(String(f.donor.eye).toUpperCase()) + '</span>' : '') +
+            (gt ? ' <span class="wlpc-rc-gt">' + esc(gt) + '</span>' : '') +
+            '<span class="wlpc-rc-hint">matches ' + f.candidates.length + ' vessel ids — which is it?</span></div>' +
+          '<div class="wlpc-rc-acts">' +
+            f.candidates.map(function (c) { return '<button type="button" class="wlpc-rc-btn is-go" data-rc-link="' + idx + '" data-rc-vessel="' + esc(c) + '">' + esc(c) + '</button>'; }).join("") +
+            '<button type="button" class="wlpc-rc-btn" data-rc-dismiss="' + idx + '">not a match</button>' +
+          '</div></div>';
+      });
+      if (fuzzy.length > 20) html += '<div class="wlpc-rc-more">…and ' + (fuzzy.length - 20) + ' more</div>';
+      html += '</div>';
+    }
+
+    // Section 2 — unresolved lineage parents (pick the real parent).
+    if (orphans.length) {
+      html += '<div class="wlpc-rc-sec"><div class="wlpc-rc-sec-hd">Unresolved lineage parents (' + orphans.length + ')</div>';
+      orphans.slice(0, 20).forEach(function (r) {
+        var cands = vesselRecords.filter(function (v) { return v.nodeId !== r.nodeId && LOGIC().sameDonorEye(v, r); });
+        var opts = '<option value="">— pick parent —</option>' + cands.map(function (v) {
+          return '<option value="' + esc(v.nodeId) + '">' + esc(recLabelOf(v)) + '</option>';
+        }).join("");
+        html += '<div class="wlpc-rc-row">' +
+          '<div class="wlpc-rc-main"><span class="wlpc-rc-id">' + esc(recLabelOf(r)) + '</span>' +
+            '<span class="wlpc-rc-hint">declares parent “' + esc(r.parentLabel || "?") + '” — not found</span></div>' +
+          '<div class="wlpc-rc-acts">' +
+            '<select class="wlpc-rc-sel" data-rc-orphan="' + esc(r.nodeId) + '">' + opts + '</select>' +
+            '<button type="button" class="wlpc-rc-btn" data-rc-clearorphan="' + esc(r.nodeId) + '">clear label</button>' +
+          '</div></div>';
+      });
+      if (orphans.length > 20) html += '<div class="wlpc-rc-more">…and ' + (orphans.length - 20) + ' more</div>';
+      html += '</div>';
+    }
+
+    // Section 3/4 — informational, collapsed lists.
+    html += infoSection("Donor records with no vessel", rec.donorsWithoutVessel.map(function (d) {
+      return esc(d.donor) + (d.eye ? " " + esc(String(d.eye).toUpperCase()) : "") + (donorGtBits(d) ? ' · ' + esc(donorGtBits(d)) : "");
+    }));
+    html += infoSection("Vessels with no donor record", rec.vesselsWithoutDonor.map(esc));
+
+    if (!needCount) html = html.replace('class="wlpc-rc-count is-warn"', 'class="wlpc-rc-count is-ok"');
+    box.innerHTML = html;
+    wireReconcile(box);
+  }
+
+  function infoSection(title, items) {
+    if (!items.length) return "";
+    var shown = items.slice(0, 40).join(" · ");
+    return '<details class="wlpc-rc-info"><summary>' + esc(title) + ' (' + items.length + ')</summary>' +
+      '<div class="wlpc-rc-info-list">' + shown + (items.length > 40 ? " …" : "") + '</div></details>';
+  }
+
+  function recLabelOf(r) {
+    return (r.label && String(r.label).trim()) ||
+      (LOGIC().normalizeDonor(r.donor) + (r.eye && r.eye !== "unknown" ? " " + String(r.eye).toUpperCase() : "") +
+        (r.passage !== "" && r.passage != null ? " P" + r.passage : "")).trim() ||
+      ("Vessel " + r.nodeId);
+  }
+
+  function wireReconcile(box) {
+    box.onclick = function (e) {
+      var t = e.target;
+      if (t.closest && t.closest("[data-rc-toggle]")) { reconcileCollapsed = !reconcileCollapsed; renderReconcilePanel(); return; }
+      var link = t.getAttribute && t.getAttribute("data-rc-link");
+      if (link != null) { confirmDonorMatch(parseInt(link, 10), t.getAttribute("data-rc-vessel")); return; }
+      var dis = t.getAttribute && t.getAttribute("data-rc-dismiss");
+      if (dis != null) { dismissDonor(parseInt(dis, 10)); return; }
+      var clr = t.getAttribute && t.getAttribute("data-rc-clearorphan");
+      if (clr != null) { clearOrphanLabel(clr); return; }
+    };
+    box.onchange = function (e) {
+      var sel = e.target.getAttribute && e.target.getAttribute("data-rc-orphan");
+      if (sel != null && e.target.value) setOrphanParent(sel, e.target.value);
+    };
+  }
+
+  function confirmDonorMatch(idx, vesselDonor) {
+    var donorsAll = (typeof window.wlpLoadCultureDonors === "function") ? (window.wlpLoadCultureDonors() || []) : [];
+    var d = donorsAll[idx];
+    if (!d || !vesselDonor) return;
+    d.confirmedVessel = vesselDonor;
+    if (typeof window.wlpSaveCultureDonors === "function") window.wlpSaveCultureDonors(donorsAll);
+    fuseDonorOntoVessels(d, vesselDonor);
+    renderView();
+    showImportStatus("Linked donor " + d.donor + " → " + vesselDonor + " and fused its ground truth.", false);
+  }
+  function dismissDonor(idx) {
+    var donorsAll = (typeof window.wlpLoadCultureDonors === "function") ? (window.wlpLoadCultureDonors() || []) : [];
+    var d = donorsAll[idx];
+    if (!d) return;
+    d._dismissed = true;
+    if (typeof window.wlpSaveCultureDonors === "function") window.wlpSaveCultureDonors(donorsAll);
+    renderView();
+  }
+  // Fuse a donor's ground truth onto every vessel with the confirmed donor id:
+  // the dissociation date (if the vessel lacks one) and a compact GT note so the
+  // deceased date / seeding outcome aren't lost.
+  function fuseDonorOntoVessels(d, vesselDonor) {
+    var nodes = allCultureVessels().filter(function (n) { return read(n, "Donor", "") === vesselDonor; });
+    var changed = 0;
+    nodes.forEach(function (n) {
+      if (d.dissociation && !read(n, "DissociationDate", "")) { write(n, "DissociationDate", d.dissociation); changed++; }
+      var gt = [];
+      if (d.deceased) gt.push("deceased " + d.deceased);
+      if (d.seeding) gt.push("seeding " + d.seeding);
+      if (d.age) gt.push("age " + d.age + (d.sex || ""));
+      if (gt.length) {
+        var note = read(n, "Notes", "");
+        if (note.indexOf("[donor GT:") < 0) { write(n, "Notes", (note ? note + " " : "") + "[donor GT: " + gt.join(", ") + "]"); changed++; }
+      }
+    });
+    if (changed && typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+  }
+  function setOrphanParent(childId, parentId) {
+    if (!parentId) return;
+    var node = document.querySelector('.drop[data-node-id="' + childId + '"]');
+    if (!node) return;
+    var recs = allCultureVessels().map(function (n) { return { nodeId: n.dataset.nodeId || "", parentNodeId: n.dataset.cultureParentNodeId || "" }; });
+    if (LOGIC().wouldCreateCycle(recs, childId, parentId)) { showImportStatus("That parent would create a cycle — pick another.", true); return; }
+    node.dataset.cultureParentNodeId = parentId;
+    delete node.dataset.cultureParentLabel;
+    if (typeof window.wlpSyncAllLineageConnections === "function") { try { window.wlpSyncAllLineageConnections(); } catch (e) { /* ignore */ } }
+    if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+    renderView();
+    showImportStatus("Linked lineage parent.", false);
+  }
+  function clearOrphanLabel(childId) {
+    var node = document.querySelector('.drop[data-node-id="' + childId + '"]');
+    if (!node) return;
+    delete node.dataset.cultureParentLabel;
+    if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+    renderView();
+  }
+  // app.js calls this after the donor registry is hydrated from the backend.
+  window.wlpOnDonorsHydrated = function () { try { if (view) renderReconcilePanel(); } catch (e) { /* ignore */ } };
 
   // Donor+Eye grouping key/label for the table view — all passages from the same
   // donor eye (e.g. 6768 OS = left cornea) share one group.
@@ -926,7 +1132,52 @@
     }, 60);
   }
 
+  // A donor ground-truth CSV (from the donor-consolidation step) vs. a vessel CSV.
+  function isDonorCsv(text) {
+    var first = String(text || "").split(/\r?\n/, 1)[0].toLowerCase();
+    return first.indexOf("rawdonorid") >= 0 ||
+      (first.indexOf("allfields") >= 0 && first.indexOf("matchstatus") >= 0);
+  }
+
+  // Import a donor ground-truth CSV into the registry (persisted per project via
+  // app.js). Records are keyed by donor id + source so re-importing is idempotent.
+  function runDonorImport(text) {
+    var rows = LOGIC().parseCsv(text) || [];
+    if (rows.length < 2) { showImportStatus("No donor rows found in that CSV.", true); return; }
+    var hdr = rows[0].map(function (h) { return String(h || "").trim().toLowerCase(); });
+    function col(r, name) { var i = hdr.indexOf(name); return i >= 0 && i < r.length ? String(r[i] == null ? "" : r[i]).trim() : ""; }
+    var recs = [];
+    for (var i = 1; i < rows.length; i++) {
+      var r = rows[i];
+      if (!r || !r.length) continue;
+      var donor = col(r, "rawdonorid") || col(r, "donor") || col(r, "donor id");
+      if (!donor) continue;
+      recs.push({
+        donor: donor, eye: col(r, "eye"), source: col(r, "source"),
+        deceased: col(r, "deceaseddate"), dissociation: col(r, "dissociationdate"),
+        preservation: col(r, "preservationdate"), processing: col(r, "processingdate"),
+        seeding: col(r, "seedingsuccess"), age: col(r, "age"), sex: col(r, "sex"),
+        ethnicity: col(r, "ethnicity"), endothelial: col(r, "endothelialdensity"),
+        allFields: col(r, "allfields")
+      });
+    }
+    if (!recs.length) { showImportStatus("No donor rows found in that CSV.", true); return; }
+    var existing = (typeof window.wlpLoadCultureDonors === "function") ? (window.wlpLoadCultureDonors() || []) : [];
+    var seen = {};
+    existing.forEach(function (d) { seen[(d.donor || "") + "||" + (d.source || "")] = true; });
+    var added = 0;
+    recs.forEach(function (d) {
+      var k = d.donor + "||" + d.source;
+      if (!seen[k]) { existing.push(d); seen[k] = true; added++; }
+    });
+    if (typeof window.wlpSaveCultureDonors === "function") window.wlpSaveCultureDonors(existing);
+    renderView();
+    showImportStatus("Imported " + recs.length + " donor record" + (recs.length === 1 ? "" : "s") +
+      " (" + added + " new) — see “Needs confirmation”.", false);
+  }
+
   function runCsvImport(text) {
+    if (isDonorCsv(text)) { runDonorImport(text); return; }
     var parsed = LOGIC().importCsvToDrafts(text);
     if (!parsed.rowCount) { showImportStatus("No data rows found in that CSV.", true); return; }
     if (typeof window.wlpCreateCultureVessel !== "function") { showImportStatus("Import unavailable in this build.", true); return; }
@@ -1142,6 +1393,7 @@
   var canvasEl = null;
   var paletteEl = null;
   var workspaceEl = null;
+  var recorderWasActive = false;
   function syncView() {
     var ws = typeof window.wlpActiveWorkspace === "function" ? window.wlpActiveWorkspace() : "";
     var isRecorder = ws === "culture-records";
@@ -1153,7 +1405,28 @@
     // workspace TABS live in the toolbar too — hide only the actions, not the bar.
     var actions = document.querySelector(".workspace__actions");
     if (isRecorder) {
-      renderView();
+      // Only (re)render when the recorder first becomes active — not on every
+      // 1.2s tick. A per-tick rebuild is wasteful for hundreds of vessels and
+      // resets interactive state (open panels, scroll position). Explicit actions
+      // (import, add, filter, confirm) call renderView() directly.
+      if (!recorderWasActive) {
+        renderView();
+        // Pull the donor registry from the sidecar if it isn't loaded yet, then
+        // re-render the reconciliation panel once it arrives. The initial render
+        // happens before the async hydration completes, so also re-render on a
+        // short delay as a guaranteed catch-up (survives app restarts).
+        if (typeof window.wlpEnsureDonorsHydrated === "function") {
+          try {
+            Promise.resolve(window.wlpEnsureDonorsHydrated())
+              .then(function () { try { renderReconcilePanel(); } catch (e) { /* ignore */ } })
+              .catch(function () { /* ignore */ });
+          } catch (e) { /* ignore */ }
+        }
+        setTimeout(function () {
+          if (view && view.style.display !== "none") { try { renderReconcilePanel(); } catch (e) { /* ignore */ } }
+        }, 900);
+      }
+      recorderWasActive = true;
       if (view) view.style.display = "block";
       if (canvasEl) canvasEl.style.display = "none";
       if (paletteEl) paletteEl.style.display = "none";
@@ -1164,6 +1437,7 @@
       // grid fills the whole width while the recorder is active.
       if (workspaceEl) workspaceEl.style.gridColumn = "1 / -1";
     } else {
+      recorderWasActive = false;
       if (view) view.style.display = "none";
       if (canvasEl) canvasEl.style.display = "";
       if (paletteEl) paletteEl.style.display = "";

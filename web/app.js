@@ -208,6 +208,9 @@ let storageBoxForm = {};
 let storageBoxListEl = null;
 let storageBoxes = [];
 let editingStorageBoxIndex = -1;
+// Donor ground-truth registry: imported donor-metadata records (identity, death,
+// dissociation, seeding success, demographics …) reconciled against vessels.
+let cultureDonors = [];
 let storageBoxViewModal = null;
 let storageBoxViewIndex = -1;
 let aliquotBoxCurrent = null;
@@ -697,11 +700,13 @@ function collectProjectStatePayloadForBackend() {
   loadStorage();
   loadStorageBoxes();
   loadMediaFormulations();
+  loadCultureDonors();
   return {
     inventory: ensureArrayClone(inventoryItems),
     storage: ensureArrayClone(storageItems),
     storageBoxes: ensureArrayClone(storageBoxes),
-    mediaFormulations: ensureArrayClone(mediaFormulations)
+    mediaFormulations: ensureArrayClone(mediaFormulations),
+    cultureDonors: ensureArrayClone(cultureDonors)
   };
 }
 
@@ -711,12 +716,14 @@ function applyBackendProjectStateLocally(state) {
   storageItems = ensureArrayClone(state.storage);
   storageBoxes = ensureArrayClone(state.storageBoxes);
   mediaFormulations = ensureArrayClone(state.mediaFormulations);
+  cultureDonors = ensureArrayClone(state.cultureDonors);
   localProjectStateDirtySinceHydration = false;
   try {
     localStorage.setItem("inventoryV1", JSON.stringify(inventoryItems));
     localStorage.setItem("storageV1", JSON.stringify(storageItems));
     localStorage.setItem("storageBoxesV1", JSON.stringify(storageBoxes));
     localStorage.setItem("mediaFormulationsV1", JSON.stringify(mediaFormulations));
+    localStorage.setItem("cultureDonorsV1", JSON.stringify(cultureDonors));
   } catch {
     // ignore storage sync failures
   }
@@ -727,6 +734,7 @@ function applyBackendProjectStateLocally(state) {
   renderStorageBoxList();
   renderMediaFormulationList();
   updateLogPanel();
+  try { if (typeof window.wlpOnDonorsHydrated === "function") window.wlpOnDonorsHydrated(); } catch { /* ignore */ }
 }
 
 async function pullProjectStateFromBackend(force = false) {
@@ -12032,6 +12040,60 @@ function persistMediaFormulations() {
   scheduleProjectStateSync();
   scheduleCanvasSync();
 }
+
+function loadCultureDonors() {
+  try {
+    const raw = localStorage.getItem("cultureDonorsV1");
+    cultureDonors = raw ? JSON.parse(raw) : [];
+  } catch {
+    cultureDonors = [];
+  }
+  if (!Array.isArray(cultureDonors)) cultureDonors = [];
+}
+
+function persistCultureDonors() {
+  try {
+    localStorage.setItem("cultureDonorsV1", JSON.stringify(cultureDonors));
+  } catch {
+    /* ignore */
+  }
+  markProjectStateMutatedLocally();
+  scheduleProjectStateSync();
+  scheduleCanvasSync();
+}
+
+// Hooks for the culture-records module (culture.js): read + replace the donor
+// ground-truth registry. wlpSaveCultureDonors persists + syncs like storageBoxes.
+window.wlpLoadCultureDonors = function () { loadCultureDonors(); return ensureArrayClone(cultureDonors); };
+window.wlpSaveCultureDonors = function (arr) {
+  cultureDonors = Array.isArray(arr) ? ensureArrayClone(arr) : [];
+  persistCultureDonors();
+  return cultureDonors.length;
+};
+// Ensure the donor registry is populated from the authoritative sidecar store.
+// The Records "Needs confirmation" panel calls this when it opens: if we have no
+// donors in memory yet (e.g. the boot hydration raced, or the initial pull hit an
+// empty project bucket and cached that), force a fresh project-state pull for the
+// active project, then let culture.js re-render via wlpOnDonorsHydrated.
+window.wlpEnsureDonorsHydrated = async function () {
+  loadCultureDonors();
+  if (Array.isArray(cultureDonors) && cultureDonors.length) return cultureDonors.length;
+  if (!hasActiveBackendSession()) return 0;
+  // Fetch the project-state directly and apply ONLY cultureDonors. The general
+  // pullProjectStateFromBackend() has a revision-guard that aborts if the canvas
+  // load bumped the local revision, which was starving the donor registry.
+  try {
+    const pid = sanitizeProjectId(activeProjectId);
+    const result = await apiFetch(`/api/projects/${encodeURIComponent(pid)}/state`);
+    if (result.ok && result.data && result.data.state && Array.isArray(result.data.state.cultureDonors)
+        && result.data.state.cultureDonors.length) {
+      cultureDonors = ensureArrayClone(result.data.state.cultureDonors);
+      try { localStorage.setItem("cultureDonorsV1", JSON.stringify(cultureDonors)); } catch (e) { /* ignore */ }
+    }
+  } catch (e) { /* ignore */ }
+  if (typeof window.wlpOnDonorsHydrated === "function") { try { window.wlpOnDonorsHydrated(); } catch (e) { /* ignore */ } }
+  return (cultureDonors || []).length;
+};
 
 function initMediaFormulationModal() {
   if (mediaFormulationModal) return;

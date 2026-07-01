@@ -774,6 +774,7 @@ function normalizeProjectStateRecord(entry) {
     storage: ensureArrayClone(src.storage),
     storageBoxes: ensureArrayClone(src.storageBoxes),
     mediaFormulations: ensureArrayClone(src.mediaFormulations),
+    cultureDonors: ensureArrayClone(src.cultureDonors),
     createdAt: toIsoOrNow(src.createdAt),
     updatedAt: toIsoOrNow(src.updatedAt)
   };
@@ -1061,6 +1062,7 @@ function createDefaultProjectState(userId, projectId) {
     storage: [],
     storageBoxes: [],
     mediaFormulations: [],
+    cultureDonors: [],
     createdAt: stamp,
     updatedAt: stamp
   };
@@ -1093,6 +1095,7 @@ function sanitizeProjectState(state) {
     storage: normalized.storage,
     storageBoxes: normalized.storageBoxes,
     mediaFormulations: normalized.mediaFormulations,
+    cultureDonors: normalized.cultureDonors,
     createdAt: normalized.createdAt,
     updatedAt: normalized.updatedAt
   };
@@ -1111,6 +1114,9 @@ function updateProjectStateEntry(target, patch = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(patch, "mediaFormulations")) {
     state.mediaFormulations = ensureArrayClone(patch.mediaFormulations);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "cultureDonors")) {
+    state.cultureDonors = ensureArrayClone(patch.cultureDonors);
   }
   state.updatedAt = nowIso();
   return state;

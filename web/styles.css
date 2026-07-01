@@ -5333,6 +5333,35 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-cl-name { font-weight: 600; color: var(--text); font-size: .84rem; }
 .wlpc-cl-meta { font-size: .72rem; color: var(--muted); }
 
+/* ── "Needs confirmation" reconciliation region (Records) ─────────────────── */
+.wlpc-reconcile { margin: 6px 10px 4px; border: 1px solid rgba(255,214,10,.28); border-radius: 12px; background: rgba(255,214,10,.045); overflow: hidden; }
+.wlpc-rc-hd { display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; user-select: none; }
+.wlpc-rc-hd:hover { background: rgba(255,255,255,.03); }
+.wlpc-rc-title { font-weight: 700; color: var(--text); font-size: .9rem; }
+.wlpc-rc-count { min-width: 20px; text-align: center; padding: 1px 8px; border-radius: 999px; font-size: .75rem; font-weight: 800; }
+.wlpc-rc-count.is-warn { background: #ffd60a; color: #1c1c1e; }
+.wlpc-rc-count.is-ok { background: rgba(48,209,88,.22); color: #30d158; }
+.wlpc-rc-sub { color: var(--muted); font-size: .75rem; }
+.wlpc-rc-chev { margin-left: auto; color: var(--muted); font-size: .75rem; }
+.wlpc-rc-sec { padding: 4px 14px 10px; border-top: 1px solid rgba(255,255,255,.05); }
+.wlpc-rc-sec-hd { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 8px 0 6px; font-weight: 700; }
+.wlpc-rc-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; flex-wrap: wrap; }
+.wlpc-rc-main { flex: 1; min-width: 220px; display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+.wlpc-rc-id { font-weight: 600; color: var(--text); font-size: .84rem; }
+.wlpc-rc-eye { font-size: .68rem; font-weight: 700; color: #64d2ff; }
+.wlpc-rc-gt { font-size: .72rem; color: #ff9f0a; }
+.wlpc-rc-hint { font-size: .72rem; color: var(--muted); }
+.wlpc-rc-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wlpc-rc-btn { padding: 3px 10px; border-radius: 7px; border: 1px solid rgba(142,142,147,.3); background: rgba(255,255,255,.04); color: var(--text); font-size: .76rem; cursor: pointer; transition: background 120ms ease, border-color 120ms ease; }
+.wlpc-rc-btn:hover { background: rgba(255,255,255,.09); }
+.wlpc-rc-btn.is-go { border-color: rgba(100,210,255,.5); color: #64d2ff; }
+.wlpc-rc-btn.is-go:hover { background: rgba(100,210,255,.14); }
+.wlpc-rc-sel { padding: 3px 6px; border-radius: 7px; border: 1px solid rgba(142,142,147,.3); background: rgba(28,28,30,.9); color: var(--text); font-size: .76rem; max-width: 240px; }
+.wlpc-rc-more { font-size: .74rem; color: var(--muted); padding: 4px 0; }
+.wlpc-rc-info { padding: 6px 14px; border-top: 1px solid rgba(255,255,255,.05); }
+.wlpc-rc-info > summary { cursor: pointer; font-size: .76rem; color: var(--muted); font-weight: 600; }
+.wlpc-rc-info-list { font-size: .73rem; color: var(--muted); margin-top: 6px; line-height: 1.7; word-break: break-word; }
+
 /* ── Cell Culture map: tidy-timeline lane bands + vessel cards ─────────────── */
 .culture-lanes { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
 .culture-lane { position: absolute; left: 0; right: 0; border-top: 1px solid rgba(255,255,255,.05); }

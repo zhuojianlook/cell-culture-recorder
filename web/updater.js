@@ -33,6 +33,11 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.45", date: "2026-07-01", changes: [
+      "New donor ground-truth layer: import a donor CSV (donor identity + deceased / dissociation / preservation dates, seeding success, demographics) and it’s stored per-project and reconciled against your vessels. Import auto-detects donor vs. vessel CSVs.",
+      "New “Needs confirmation” region at the top of Cell Culture Records: surfaces the reconciliation gaps for you to resolve — ambiguous donor↔vessel matches (the same donor logged as ‘2025-4392’, ‘?2025-4392’, a ‘LEI-25-…’ id, or a date-id with a ‘(3468)’ cross-reference), vessels whose declared lineage parent was never found, and — collapsed — donors with no vessel and vessels with no donor record.",
+      "Confirming a donor↔vessel match fuses that donor’s ground truth (dissociation date, deceased date, seeding outcome, age) onto the vessel(s); resolving an unlinked parent draws the lineage.",
+    ] },
     { version: "0.2.44", date: "2026-07-01", changes: [
       "Multiwell plates are now first-class culture vessels (6 / 12 / 24 / 48 / 96-well): they appear in the ‘Add vessel’ picker, render as plate symbols in the Timeline, and count as vessels everywhere in the records. Previously any plate was silently treated as a T75 flask.",
       "CSV import recognises plate types in the vessel column — ‘24 Well Plate’, ‘6-well’, ‘plate 96’, etc. — and maps them to the right plate, snapping odd well counts to the nearest supported size.",

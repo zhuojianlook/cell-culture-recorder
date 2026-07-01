@@ -58,6 +58,48 @@ test("vesselIconFromText recognises multiwell plates (Legacy log)", () => {
   assert.equal(L.isFlaskOrDishIcon("cell_line"), false);
 });
 
+test("donorIdentity derives core/eye/aliases across the source id formats", () => {
+  const rc = L.donorIdentity("2024-6590RC");     // RC = right cornea = OD
+  assert.equal(rc.eye, "OD");
+  assert.ok(rc.aliases.includes("6590"), "year-stripped core");
+
+  const x = L.donorIdentity("?20250524 (3468) OD");
+  assert.equal(x.uncertain, true);
+  assert.equal(x.eye, "OD");
+  assert.equal(x.core, "3468", "parenthetical cross-reference wins");
+  assert.ok(x.aliases.includes("3468"));
+
+  const lei = L.donorIdentity("LEI-25-036860");  // prefix + leading zero stripped
+  assert.ok(lei.aliases.includes("36860"));
+
+  const cn = L.donorIdentity("LWVI-25-000053ODCN");
+  assert.equal(cn.eye, "OD");
+
+  const v = L.donorIdentity("2025-3468");         // year-stripped alias bridges to (3468)
+  assert.ok(v.aliases.includes("3468"));
+});
+
+test("reconcileDonors buckets matched / fuzzy / unmatched across sources", () => {
+  const vessels = [
+    { donor: "2025-3468", eye: "OU" },
+    { donor: "?2025-4392", eye: "OU" },
+    { donor: "2025-4392", eye: "OU" },
+    { donor: "045986", eye: "OD" },
+    { donor: "6765", eye: "OS" },          // legacy vessel, no donor metadata
+  ];
+  const donors = [
+    { donor: "?20250524 (3468) OD" },      // -> 2025-3468 (confident, via cross-ref)
+    { donor: "2025-4392RC" },              // -> BOTH 2025-4392 and ?2025-4392 (fuzzy)
+    { donor: "LWVI-25-045986ODCN" },       // -> 045986 (confident)
+    { donor: "2099-9999" },                // -> no vessel
+  ];
+  const r = L.reconcileDonors(donors, vessels);
+  assert.equal(r.matched.length, 2, "3468 + 045986 match one vessel each");
+  assert.equal(r.fuzzy.length, 1, "4392 spans two vessel labels -> confirm");
+  assert.equal(r.donorsWithoutVessel.length, 1, "2099-9999 has no vessel");
+  assert.ok(r.vesselsWithoutDonor.includes("6765"), "legacy vessel has no donor record");
+});
+
 test("cultureLabelSummary builds the canvas identity", () => {
   assert.equal(L.cultureLabelSummary({ donor: "6769", eye: "OD", passage: "2" }), "6769 OD P2");
   assert.equal(L.cultureLabelSummary({ donor: "6769", eye: "unknown", passage: "0" }), "6769 P0");
