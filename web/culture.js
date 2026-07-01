@@ -13,6 +13,7 @@
   // Cell Culture palette icons; labels come from WLPCultureLogic.VESSEL_TYPES).
   var VESSEL_ICON_ORDER = [
     "t25_flask", "t75_flask", "t150_flask", "t175_flask", "t225_flask", "t300_flask",
+    "plate_6", "plate_12", "plate_24", "plate_48", "plate_96",
     "dish_35mm", "dish_60mm", "dish_100mm", "dish_150mm", "cell_line", "primary_tissue",
   ];
 
@@ -74,7 +75,7 @@
     return all.filter(function (n) {
       if (n === node) return false;
       var id = String(n.dataset.iconId || "");
-      return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id === "cell_line" || id === "primary_tissue";
+      return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id.indexOf("plate_") === 0 || id === "cell_line" || id === "primary_tissue";
     });
   }
   function nodeLabel(n) {
@@ -534,7 +535,7 @@
       .call(document.querySelectorAll('.drop[data-workspace="cell-culture"]'))
       .filter(function (n) {
         var id = String(n.dataset.iconId || "");
-        return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id === "cell_line" || id === "primary_tissue";
+        return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id.indexOf("plate_") === 0 || id === "cell_line" || id === "primary_tissue";
       });
   }
 
@@ -834,12 +835,12 @@
     clusterBackdrop.innerHTML =
       '<div class="modal" style="max-width:540px;width:540px;margin-top:9vh">' +
         '<div class="modal__header" style="display:flex;align-items:center;justify-content:space-between">' +
-          "<h3 style=\"margin:0\">" + members.length + " flasks — split or duplicate?</h3>" +
+          "<h3 style=\"margin:0\">" + members.length + " vessels — split or duplicate?</h3>" +
           '<button type="button" class="btn wlpc-cl-x" id="wlpcClX" aria-label="Close">✕</button>' +
         "</div>" +
         '<div class="modal__body">' +
           '<p class="wlpc-cl-lead">' + head + "</p>" +
-          '<p class="wlpc-cl-hint">These vessels share a passage <em>and</em> a seed date. If they are the same flask entered more than once, choose which to <strong>keep</strong> and merge the rest into it. If they are real splits from one parent, leave them as ' + members.length + " separate vessels.</p>" +
+          '<p class="wlpc-cl-hint">These vessels share a passage <em>and</em> a seed date. If they are the same vessel entered more than once, choose which to <strong>keep</strong> and merge the rest into it. If they are real splits from one parent, leave them as ' + members.length + " separate vessels.</p>" +
           '<div class="wlpc-cl-list">' + rows + "</div>" +
         "</div>" +
         '<div class="modal__footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">' +

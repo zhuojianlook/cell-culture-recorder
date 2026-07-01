@@ -6084,7 +6084,7 @@ function updateAllConnections() {
 // matching connection (see wlpSyncLineageConnection).
 function isCultureVesselNode(node) {
   const id = String((node && node.dataset && node.dataset.iconId) || "");
-  return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id === "cell_line" || id === "primary_tissue";
+  return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id.indexOf("plate_") === 0 || id === "cell_line" || id === "primary_tissue";
 }
 function ensureLineageConnection(parentId, childId) {
   if (!parentId || !childId || parentId === childId) return;

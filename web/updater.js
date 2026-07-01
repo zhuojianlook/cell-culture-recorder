@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.44", date: "2026-07-01", changes: [
+      "Multiwell plates are now first-class culture vessels (6 / 12 / 24 / 48 / 96-well): they appear in the ‘Add vessel’ picker, render as plate symbols in the Timeline, and count as vessels everywhere in the records. Previously any plate was silently treated as a T75 flask.",
+      "CSV import recognises plate types in the vessel column — ‘24 Well Plate’, ‘6-well’, ‘plate 96’, etc. — and maps them to the right plate, snapping odd well counts to the nearest supported size.",
+    ] },
     { version: "0.2.43", date: "2026-07-01", changes: [
       "Records → Timeline: click a ×N cluster to expand it. A panel lists the individual flasks that share that passage and seed date — each with its vessel type, status, medium and notes — so you can tell a real split (different conditions) from the same flask logged twice.",
       "If they are duplicates, pick which flask to keep and ‘Merge into 1’: the rest are removed, any lineage that pointed at them is re-pointed onto the one you kept, and any distinct notes / medium / seed date are carried over so nothing is lost.",

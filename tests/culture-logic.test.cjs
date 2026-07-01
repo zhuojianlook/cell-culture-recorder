@@ -25,6 +25,8 @@ const L = loadUMD("../web/culture-logic.js");
 test("vesselTypeFromIcon maps known icons, falls back gracefully", () => {
   assert.equal(L.vesselTypeFromIcon("t75_flask"), "T75 flask");
   assert.equal(L.vesselTypeFromIcon("dish_60mm"), "60mm dish");
+  assert.equal(L.vesselTypeFromIcon("plate_24"), "24-well plate");
+  assert.equal(L.vesselTypeFromIcon("plate_6"), "6-well plate");
   assert.equal(L.vesselTypeFromIcon("cell_line"), "Cell line");
   assert.equal(L.vesselTypeFromIcon("totally_unknown"), "totally_unknown");
   assert.equal(L.vesselTypeFromIcon(""), "Vessel");
@@ -32,12 +34,28 @@ test("vesselTypeFromIcon maps known icons, falls back gracefully", () => {
 });
 
 test("isCultureVesselIcon recognises culture vessels only", () => {
-  ["t25_flask", "t300_flask", "dish_35mm", "dish_150mm", "cell_line", "primary_tissue"].forEach((id) =>
+  ["t25_flask", "t300_flask", "dish_35mm", "dish_150mm", "plate_6", "plate_96", "cell_line", "primary_tissue"].forEach((id) =>
     assert.equal(L.isCultureVesselIcon(id), true, id)
   );
   ["task", "cage_5", "animal_mouse", "", null].forEach((id) =>
     assert.equal(L.isCultureVesselIcon(id), false, String(id))
   );
+});
+
+test("vesselIconFromText recognises multiwell plates (Legacy log)", () => {
+  assert.equal(L.vesselIconFromText("24 Well Plate"), "plate_24");
+  assert.equal(L.vesselIconFromText("6-well"), "plate_6");
+  assert.equal(L.vesselIconFromText("12 Well Plate"), "plate_12");
+  assert.equal(L.vesselIconFromText("plate 96"), "plate_96");
+  assert.equal(L.vesselIconFromText("10 well"), "plate_12", "snaps to nearest supported size");
+  assert.equal(L.vesselIconFromText("well plate"), "plate_24", "bare 'well/plate' defaults to 24");
+  // flasks/dishes still win when specified, unknown still defaults to a flask
+  assert.equal(L.vesselIconFromText("T75"), "t75_flask");
+  assert.equal(L.vesselIconFromText("60mm dish"), "dish_60mm");
+  assert.equal(L.vesselIconFromText("something odd"), "t75_flask");
+  // plates count as physical vessels for the source-type-vs-vessel rule
+  assert.equal(L.isFlaskOrDishIcon("plate_24"), true);
+  assert.equal(L.isFlaskOrDishIcon("cell_line"), false);
 });
 
 test("cultureLabelSummary builds the canvas identity", () => {

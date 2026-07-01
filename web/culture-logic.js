@@ -18,6 +18,8 @@
   var VESSEL_TYPES = {
     t25_flask: "T25 flask", t75_flask: "T75 flask", t150_flask: "T150 flask",
     t175_flask: "T175 flask", t225_flask: "T225 flask", t300_flask: "T300 flask",
+    plate_6: "6-well plate", plate_12: "12-well plate", plate_24: "24-well plate",
+    plate_48: "48-well plate", plate_96: "96-well plate", plate_384: "384-well plate", plate_1536: "1536-well plate",
     dish_35mm: "35mm dish", dish_60mm: "60mm dish", dish_100mm: "100mm dish", dish_150mm: "150mm dish",
     cell_line: "Cell line", primary_tissue: "Primary tissue"
   };
@@ -37,7 +39,7 @@
 
   function isCultureVesselIcon(iconId) {
     var id = str(iconId);
-    return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id === "cell_line" || id === "primary_tissue";
+    return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id.indexOf("plate_") === 0 || id === "cell_line" || id === "primary_tissue";
   }
 
   // The canvas-label summary for a vessel, e.g. "6769 OD P2". Empty when no donor.
@@ -74,11 +76,11 @@
   }
 
   // ─── Provenance helpers (ported from the original recorder) ─────────────────
-  // A flask or dish icon (a physical culture vessel, as opposed to a cell line or
-  // primary-tissue record). Used by the source-type-vs-vessel rule.
+  // A flask, dish or multiwell-plate icon (a physical culture vessel, as opposed
+  // to a cell line or primary-tissue record). Used by the source-type-vs-vessel rule.
   function isFlaskOrDishIcon(iconId) {
     var id = str(iconId);
-    return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0;
+    return id.indexOf("_flask") >= 0 || id.indexOf("dish_") === 0 || id.indexOf("plate_") === 0;
   }
   // Normalize a raw source / donor identifier for equality (strip case + punctuation).
   function normalizeSourceId(value) {
@@ -535,11 +537,23 @@
     return "";
   }
 
+  // Snap a well count to the nearest plate size the app actually has an icon for.
+  function snapPlateSize(n) {
+    var sizes = [6, 12, 24, 48, 96, 384, 1536], v = Number(n);
+    if (sizes.indexOf(v) >= 0) return String(v);
+    var best = sizes[0], i;
+    for (i = 1; i < sizes.length; i++) { if (Math.abs(sizes[i] - v) < Math.abs(best - v)) best = sizes[i]; }
+    return String(best);
+  }
   // Free vessel text -> a known iconId (default t75_flask).
   function vesselIconFromText(text) {
     var t = str(text).toLowerCase().replace(/[^a-z0-9]/g, "");
     var m = t.match(/t(25|75|150|175|225|300)/);
     if (m) return "t" + m[1] + "_flask";
+    // Multiwell plates: "24 well plate", "6-well", "plate 96" -> plate_24 etc.
+    m = t.match(/(\d+)well/) || t.match(/plate(\d+)/);
+    if (m) return "plate_" + snapPlateSize(m[1]);
+    if (t.indexOf("well") >= 0 || t.indexOf("plate") >= 0) return "plate_24";
     m = t.match(/(\d+)mm/);
     if (m && ["35", "60", "100", "150"].indexOf(m[1]) >= 0) return "dish_" + m[1] + "mm";
     if (t.indexOf("dish") >= 0) return "dish_60mm";
