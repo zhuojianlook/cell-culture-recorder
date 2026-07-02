@@ -1786,13 +1786,18 @@
     var msOf = function (s) { var t = Date.parse(s); return isNaN(t) ? NaN : t; };
     function pnum(v) { var n = Number(v.passage); return (v.passage !== "" && v.passage != null && !isNaN(n)) ? n : null; }
 
-    // Collapse vessels that share the same passage AND seed date into ONE node —
-    // these are the "split or duplicate" siblings, shown once with a ×N badge
-    // instead of N stacked symbols. Lineage links map to the collapsed node.
+    // A vessel that takes part in lineage — it has a parent, or it IS a parent —
+    // gets its OWN node, so a passage BRANCH POINT shows as independent lines from
+    // the parent to each daughter (rather than the daughters collapsing into one
+    // ×N node with a single merged link). Vessels with no lineage still collapse by
+    // passage + seed date into one node with a ×N badge (duplicate/parallel entries).
+    var hasChild = {};
+    vessels.forEach(function (v) { if (v.parentNodeId) hasChild[v.parentNodeId] = true; });
     var clusters = [], byKey = {}, clOf = {};
     vessels.forEach(function (v) {
       var pk = (pnum(v) === null ? "?" : pnum(v));
-      var key = pk + "||" + String(v.seedDate || "");
+      var inLineage = v.parentNodeId || hasChild[v.nodeId];
+      var key = inLineage ? ("solo::" + v.nodeId) : (pk + "||" + String(v.seedDate || ""));
       var c = byKey[key];
       if (!c) { c = byKey[key] = { pk: pk, seed: v.seedDate, ms: msOf(v.seedDate), members: [], rep: v, id: clusters.length }; clusters.push(c); }
       c.members.push(v);
@@ -1851,15 +1856,14 @@
     var H = y + 18;
 
     // Lineage edges between CLUSTERS (parent's cluster → child's cluster), deduped.
-    var edges = "", eSeen = {};
+    // One independent link per parent→daughter vessel (no per-cluster dedup), so a
+    // branch point fans out: a shared vertical drop from the parent, then a separate
+    // right-angle arm to each daughter's date. Orthogonal — no curves.
+    var edges = "";
     vessels.forEach(function (v) {
       if (!v.parentNodeId) return;
       var pc = clOf[v.parentNodeId], cc = clOf[v.nodeId];
       if (!pc || !cc || pc === cc) return;
-      var ek = pc.id + ">" + cc.id;
-      if (eSeen[ek]) return; eSeen[ek] = true;
-      // Orthogonal (right-angle) connector: down from the parent to a mid-line,
-      // across to the child's date, then down to the child. No curves.
       var my = (pc._y + cc._y) / 2;
       edges += '<path class="wlpc-tl-edge" d="M' + pc._x.toFixed(1) + " " + pc._y + " V" + my.toFixed(1) + " H" + cc._x.toFixed(1) + " V" + cc._y + '"/>';
     });

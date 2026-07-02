@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.54", date: "2026-07-02", changes: [
+      "Passage branch points are now shown properly: when a vessel is split into several daughter vessels, each daughter is drawn as its own node with its OWN independent line back to the parent, so a 1→N split fans out as a branch instead of collapsing into a single merged link. Vessels that take part in a lineage are shown individually; the ×N badge is now reserved for genuine duplicate/parallel entries with no lineage.",
+    ] },
     { version: "0.2.53", date: "2026-07-02", changes: [
       "Timeline is cleaner: lineage links are now straight lines with right-angle bends instead of curves, and each microscopy 🔬 icon sits directly ON the passage line at the exact date its image was taken (no longer floated above it). Click a 🔬 to view the image as before.",
     ] },
