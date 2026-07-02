@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.56", date: "2026-07-02", changes: [
+      "Multiwell-plate wells now show up everywhere. On the Timeline, each seeded well is its own point placed in its donor's passage band (tagged with its well id, e.g. A1) — so a plate seeded with different donors across its wells appears under each donor; click a well point to edit it. On the planning canvas, a plate's glyph now colours in the wells that have a record (by status) and shows a small “N seeded” badge, so you can see at a glance which wells are filled. Completes the per-well plate support across the editor, the Records table, the Timeline, and the canvas.",
+    ] },
     { version: "0.2.55", date: "2026-07-02", changes: [
       "Multiwell plates: each well can now be its own entry. Double-click a plate (in the Cell Culture Records or on the canvas) to open a well-grid editor laid out like the physical plate (a 6-well plate is 2×3); click any well to record its own donor / eye / passage / status / seed date / notes. The Records table shows a plate as a “N / M wells seeded” summary that expands to one row per seeded well. A plate that already had a single record keeps it (it becomes well A1); nothing is lost. (Timeline + on-canvas well colouring to follow.)",
     ] },

@@ -66,6 +66,20 @@
   function allRecords() {
     return allCultureVessels().map(recordOf);
   }
+  // Like allRecords(), but a seeded multiwell plate is fanned into one record PER
+  // well (each under its own donor). Used by the TIMELINE so each well appears as
+  // its own point; the table + reconcile keep the plate-as-one-node view.
+  function allRecordsExpanded() {
+    var out = [];
+    allCultureVessels().forEach(function (n) {
+      if (isPlateNode(n)) {
+        var w = plateWellRecords(n);
+        if (w.length) { w.forEach(function (r) { out.push(r); }); return; }
+      }
+      out.push(recordOf(n));
+    });
+    return out;
+  }
   function vesselTypeFromIcon(node) {
     return LOGIC().vesselTypeFromIcon(node.dataset.iconId);
   }
@@ -1541,13 +1555,28 @@
   // (Hover is handled by CSS :hover on .wlpc-tree-row.)
   // Open a vessel's record: switch to the Cell Culture canvas, focus the node,
   // then pop the editor (the behaviour used throughout the recorder).
+  // Open a record by node id. A plate-well id ("plateId#well") opens the plate
+  // editor on that well (a modal — no canvas node to focus); a plain id opens the
+  // vessel record.
+  function openRecordById(id) {
+    var sid = String(id || ""), h = sid.indexOf("#");
+    if (h >= 0) {
+      var pnode = document.querySelector('.drop[data-node-id="' + sid.slice(0, h) + '"]');
+      if (pnode) openPlateRecord(pnode, sid.slice(h + 1));
+      return;
+    }
+    var node = document.querySelector('.drop[data-node-id="' + sid + '"]');
+    if (node) openRecord(node);
+  }
   function focusAndOpen(id) {
-    var node = id && document.querySelector('.drop[data-node-id="' + id + '"]');
+    var sid = String(id || "");
+    if (sid.indexOf("#") >= 0) { openRecordById(sid); return; } // a plate well — modal only
+    var node = document.querySelector('.drop[data-node-id="' + sid + '"]');
     if (!node) return;
     if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("cell-culture");
     syncView();
     setTimeout(function () {
-      if (typeof window.wlpFocusNode === "function") window.wlpFocusNode(id);
+      if (typeof window.wlpFocusNode === "function") window.wlpFocusNode(sid);
       openRecord(node);
     }, 80);
   }
@@ -1954,7 +1983,7 @@
   function renderTree() {
     if (!buildView()) return;
     var body = view.querySelector("#wlpcGridBody");
-    var all = allRecords();
+    var all = allRecordsExpanded(); // each seeded plate well is its own timeline point
     var shown = filteredRecords(all);
     updateSubtitle(all, shown);
     var forest = LOGIC().buildLineageForest(shown);
@@ -2036,7 +2065,10 @@
     var clusters = [], byKey = {}, clOf = {};
     vessels.forEach(function (v) {
       var pk = (pnum(v) === null ? "?" : pnum(v));
-      var inLineage = v.parentNodeId || hasChild[v.nodeId];
+      // Lineage vessels AND individual plate wells each get their own node (a well
+      // is a distinct entry with no real .drop node, so it must not fold into a ×N
+      // cluster whose expand/merge acts on nodes).
+      var inLineage = v.parentNodeId || hasChild[v.nodeId] || v.isWell;
       var key = inLineage ? ("solo::" + v.nodeId) : (pk + "||" + String(v.seedDate || ""));
       var c = byKey[key];
       if (!c) { c = byKey[key] = { pk: pk, seed: v.seedDate, ms: msOf(v.seedDate), members: [], rep: v, id: clusters.length }; clusters.push(c); }
@@ -2131,11 +2163,11 @@
       var anyFlag = c.members.some(function (m) { var f = flags[m.nodeId] || {}; return f.orphan || f.crossDonor || f.passageBack; });
       var inner = (typeof window.wlpIconInner === "function") ? window.wlpIconInner(v.iconId) : "";
       var pass = (v.passage !== "" && v.passage != null) ? "P" + esc(v.passage) : "P?";
-      var t = [(n > 1 ? n + "× " : "") + pass + (v.seedDate ? " · " + shortDate(v.seedDate) : ""), LOGIC().vesselTypeFromIcon(v.iconId), v.status || "active"];
+      var t = [(n > 1 ? n + "× " : "") + (v.isWell ? "Well " + v.well + " · " : "") + pass + (v.seedDate ? " · " + shortDate(v.seedDate) : ""), LOGIC().vesselTypeFromIcon(v.iconId), v.status || "active"];
       if (n > 1) t.push(n + " flasks at this passage on one date — a split, or duplicate entries");
       if (uncertain) t.push("best guess (source marked uncertain)");
       nodes +=
-        '<g class="wlpc-tl-node' + (anyFlag ? " is-flagged" : "") + (n > 1 ? " is-cluster" : "") + '" data-node-id="' + esc(v.nodeId) + '"' +
+        '<g class="wlpc-tl-node' + (anyFlag ? " is-flagged" : "") + (n > 1 ? " is-cluster" : "") + (v.isWell ? " is-well" : "") + '" data-node-id="' + esc(v.nodeId) + '"' +
           (n > 1 ? ' data-cluster-members="' + esc(c.members.map(function (m) { return m.nodeId; }).join(",")) + '"' : "") +
           ' transform="translate(' + c._x.toFixed(1) + "," + c._y + ')">' +
           "<title>" + esc(t.join(" · ")) + "</title>" +
@@ -2143,6 +2175,7 @@
           '<g transform="translate(-11.5,-11.5) scale(0.36)" style="color:' + color + '">' + inner + "</g>" +
           '<text class="wlpc-tl-date" y="' + (NR + 12) + '" text-anchor="middle">' + (v.seedDate ? esc(shortDate(v.seedDate)) : "—") + "</text>" +
           (n > 1 ? '<circle class="wlpc-tl-count-bg" cx="' + (NR - 1) + '" cy="-' + (NR - 3) + '" r="8"/><text class="wlpc-tl-count" x="' + (NR - 1) + '" y="-' + (NR - 6) + '" text-anchor="middle">' + n + "</text>" : "") +
+          (v.isWell ? '<text class="wlpc-tl-well" x="' + (NR - 1) + '" y="-' + (NR - 4) + '" text-anchor="end">' + esc(v.well) + "</text>" : "") +
           (uncertain ? '<text class="wlpc-tl-guess" x="-' + (NR - 1) + '" y="-' + (NR - 5) + '" text-anchor="end">?</text>' : "") +
           (anyFlag ? '<circle class="wlpc-tl-flag" cx="-' + (NR - 2) + '" cy="' + (NR - 3) + '" r="4"/>' : "") +
         "</g>";

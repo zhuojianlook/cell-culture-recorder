@@ -333,6 +333,13 @@
     });
   }
 
+  // Status colour for a well/record (shared with culture.js statusColor so the
+  // canvas plate glyph agrees with the records views).
+  function wellRecordColor(rec) {
+    var s = (rec && rec.status) || "active";
+    return { active: "#63a66a", frozen: "#64d2ff", contaminated: "#ff453a", discarded: "#8e8e93" }[s] || "#8e8e93";
+  }
+
   // Grid sort: donor, then eye, then passage (numeric), then seed date.
   function compareCultureRecords(a, b) {
     a = a || {}; b = b || {};
@@ -938,6 +945,7 @@
     donorIdentity: donorIdentity,
     donorMatchQuality: donorMatchQuality,
     wellRecordsToRecords: wellRecordsToRecords,
+    wellRecordColor: wellRecordColor,
     reconcileDonors: reconcileDonors,
     parseEvents: parseEvents,
     statusFromEvent: statusFromEvent,

@@ -5321,6 +5321,7 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-tl-split { fill: #64d2ff; font-size: 15px; font-weight: 700; }
 .wlpc-tl-count-bg { fill: #64d2ff; }
 .wlpc-tl-count { fill: #0b0b0c; font-size: 11px; font-weight: 800; font-family: var(--font-display, sans-serif); }
+.wlpc-tl-well { fill: #cfe3ff; font-size: 9px; font-weight: 800; font-family: var(--font-display, sans-serif); }
 .wlpc-tl-node.is-cluster:hover .wlpc-tl-count-bg { filter: brightness(1.2); }
 
 /* ── ×N cluster expand panel (split-or-duplicate reconciliation) ──────────── */
@@ -5415,9 +5416,13 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-well-row > td { background: rgba(255,255,255,.014); }
 .wlpc-well-row .wlpc-col-label { padding-left: 22px; }
 .wlpc-well-tag { display: inline-block; min-width: 26px; text-align: center; font-size: .64rem; font-weight: 700; color: #cfe3ff; background: rgba(120,170,255,.16); border-radius: 5px; padding: 1px 5px; margin-right: 6px; }
-/* canvas plate glyph: seeded wells + badge (Stage 3) */
-.plate-glyph-well.is-seeded { opacity: 1; }
-.plate-records-badge { pointer-events: auto; cursor: pointer; }
+/* canvas plate glyph: seeded wells coloured by status + a "N seeded" badge */
+.plate-glyph-well { transition: fill 120ms ease; }
+.plate-records-badge {
+  position: absolute; bottom: 3px; left: 3px; z-index: 4; pointer-events: none;
+  font: 700 9px/1 system-ui, -apple-system, sans-serif; color: #0b0b0c; background: #64d2ff;
+  border: 1.5px solid #2c2c2e; border-radius: 8px; padding: 2px 5px; white-space: nowrap;
+}
 
 /* ── Cell Culture map: tidy-timeline lane bands + vessel cards ─────────────── */
 .culture-lanes { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }

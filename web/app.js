@@ -4061,12 +4061,15 @@ function renderPlateWells(mark) {
   const yMax = 38;
   const dx = cols > 1 ? (xMax - xMin) / (cols - 1) : 0;
   const dy = rows > 1 ? (yMax - yMin) / (rows - 1) : 0;
+  const ids = getPlateWellIds(iconMarkNumber(mark)) || [];
   const parts = [];
+  let idx = 0;
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const cx = xMin + col * dx;
       const cy = yMin + row * dy;
-      parts.push(`<circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(2)}"></circle>`);
+      const wid = ids[idx++] || "";
+      parts.push(`<circle class="plate-glyph-well" data-well-id="${wid}" cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(2)}"></circle>`);
     }
   }
   return parts.join("");
@@ -5291,7 +5294,7 @@ function placeIcon({ x, y, iconId, label, forceCanvas = false, skipStartModal = 
   enableLabelEditing(nameInput);
   autosizeLabel(nameInput);
   if (isAnimalProcedure) renderAnimalProcedureBadge(drop);
-  if (isMultiWellPlateNode(drop)) renderPlateNodeOverlay(drop);
+  if (isMultiWellPlateNode(drop)) { renderPlateNodeOverlay(drop); paintPlateGlyphRecords(drop); }
   applyWorkspaceVisibility();
   applyPlanningDependencyVisuals();
   renderPlanningTaskPanel();
@@ -5374,7 +5377,7 @@ function wireDropNode(drop) {
   });
   enableMove(drop);
   if (isAnimalProcedureNode(drop)) renderAnimalProcedureBadge(drop);
-  if (isMultiWellPlateNode(drop)) renderPlateNodeOverlay(drop);
+  if (isMultiWellPlateNode(drop)) { renderPlateNodeOverlay(drop); paintPlateGlyphRecords(drop); }
 }
 
 function isAnimalProcedureNode(node) {
@@ -13037,6 +13040,37 @@ function getPlateGroupOverdueSet(node, data = null) {
   return overdueIds;
 }
 
+// Colour the plate's icon-glyph wells by which wells have a culture record
+// (node.dataset.cultureWells, written by the Records tab) + a small "N seeded"
+// badge. Pure decoration on the node glyph; does NOT touch the media-group
+// overlay. Safe to call repeatedly.
+function paintPlateGlyphRecords(node) {
+  if (!node || !isMultiWellPlateNode(node)) return;
+  let wells = [];
+  try { wells = JSON.parse(node.dataset.cultureWells || "[]"); } catch (e) { wells = []; }
+  const seeded = {};
+  (Array.isArray(wells) ? wells : []).forEach((w) => {
+    if (w && w.well && (w.donor || w.eye || w.passage || w.status || w.seedDate || w.notes)) {
+      seeded[String(w.well).toUpperCase()] = w;
+    }
+  });
+  const colorOf = (w) => (window.WLPCultureLogic ? window.WLPCultureLogic.wellRecordColor(w) : "#63a66a");
+  node.querySelectorAll(".plate-glyph-well").forEach((c) => {
+    const wid = String(c.getAttribute("data-well-id") || "").toUpperCase();
+    const w = seeded[wid];
+    if (w) { c.classList.add("is-seeded"); c.style.fill = colorOf(w); }
+    else { c.classList.remove("is-seeded"); c.style.fill = ""; }
+  });
+  const count = Object.keys(seeded).length;
+  let badge = node.querySelector(".plate-records-badge");
+  if (count > 0) {
+    if (!badge) { badge = document.createElement("div"); badge.className = "plate-records-badge"; node.appendChild(badge); }
+    badge.textContent = count + " seeded";
+    badge.title = count + " well" + (count === 1 ? "" : "s") + " seeded — double-click the plate to edit wells";
+  } else if (badge) { badge.remove(); }
+}
+window.wlpPaintPlateGlyphRecords = paintPlateGlyphRecords;
+
 function renderPlateNodeOverlay(node, data = null, experiments = null) {
   if (!node) return;
   if (!isMultiWellPlateNode(node)) {
@@ -13129,6 +13163,9 @@ function renderPlateNodeOverlay(node, data = null, experiments = null) {
       }
     });
   });
+  // Reflect per-well culture records on the glyph (seeded wells + badge). The
+  // glyph is separate from this media overlay, so this is decorative only.
+  paintPlateGlyphRecords(node);
 }
 
 function getPlateTimelineAxisMetrics(node) {
