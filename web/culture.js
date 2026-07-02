@@ -581,8 +581,6 @@
     plateNode = node;
     plateDraft = parseWells(node).map(function (w) { var o = {}; WELL_FIELDS.forEach(function (k) { o[k] = w[k] == null ? "" : String(w[k]); }); return o; });
     pval("wlpwType").textContent = vesselTypeFromIcon(node);
-    var spec = (window.plateGridSpec && window.plateGridSpec(String(plateWellCount(node)))) || { cols: 3 };
-    pval("wlpwGrid").style.gridTemplateColumns = "repeat(" + Math.max(1, spec.cols) + ", 1fr)";
     var ids = plateWellIds(node);
     plateSel = normWellId(wellToSelect || (plateDraft[0] && plateDraft[0].well) || ids[0] || "A1");
     renderWellGrid();
@@ -593,7 +591,15 @@
   function renderWellGrid() {
     if (!plateNode) return;
     var grid = pval("wlpwGrid");
-    grid.innerHTML = plateWellIds(plateNode).map(function (id) {
+    var ids = plateWellIds(plateNode);
+    // Lay the grid out like the physical plate: #columns = the highest column
+    // number across the well ids (A1..A3/B1..B3 → 3), derived directly so it never
+    // depends on a fragile grid-spec lookup.
+    var cols = 1;
+    ids.forEach(function (id) { var p = window.parseWellId ? window.parseWellId(id) : null; if (p && p.col > cols) cols = p.col; });
+    grid.style.display = "grid";
+    grid.style.gridTemplateColumns = "repeat(" + cols + ", minmax(0, 1fr))";
+    grid.innerHTML = ids.map(function (id) {
       var w = draftWell(id), filled = wellFilled(w), sel = normWellId(id) === plateSel;
       var color = filled ? statusColor(w.status || "active") : "transparent";
       return '<button type="button" class="wlpw-well' + (filled ? " is-filled" : "") + (sel ? " is-sel" : "") +
@@ -1503,6 +1509,9 @@
         var id = tr.getAttribute("data-node-id");
         var node = document.querySelector('.drop[data-node-id="' + id + '"]');
         if (!node) return;
+        // A plate opens its well-grid editor straight away (a modal — no need to
+        // jump to the canvas); other vessels jump + focus their node then open.
+        if (isPlateNode(node)) { openPlateRecord(node); return; }
         jumpTo(id, function () { openRecord(node); });
       });
     });
@@ -1512,8 +1521,7 @@
         e.stopPropagation();
         var pid = tr.getAttribute("data-plate-id"), well = tr.getAttribute("data-well");
         var node = document.querySelector('.drop[data-node-id="' + pid + '"]');
-        if (!node) return;
-        jumpTo(pid, function () { openPlateRecord(node, well); });
+        if (node) openPlateRecord(node, well);
       });
     });
   }
