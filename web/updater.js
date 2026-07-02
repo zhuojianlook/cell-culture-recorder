@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.49", date: "2026-07-02", changes: [
+      "New source of truth — brightfield microscopy. Import the imaging-session CSV (built from the .nd2 / .tif filenames only — the large image files are never downloaded) and each matched vessel gains an imaging summary (sessions · fields · observation date span), shown as a 🔬 marker + tooltip on the Timeline. The import reports coverage and how many donors were imaged with no matching vessel record — a real gap the images reveal. Because the filenames are hand-typed and lossy, matching is by donor core + passage.",
+    ] },
     { version: "0.2.48", date: "2026-07-01", changes: [
       "Ground-truth conflicts: the eye-bank PDF is no longer assumed always-right. When the PDF and the spreadsheet disagree on a donor field (deceased date, endothelial density, age, sex), the Needs-confirmation panel now shows BOTH values — the PDF one marked 📄 — and lets you choose which is correct. This surfaced real spreadsheet errors (ages that were formula artifacts like averages or ‘#DIV/0!’, and a ‘deceased date’ that held a duration). Your choice is remembered and re-fused onto the vessel.",
     ] },

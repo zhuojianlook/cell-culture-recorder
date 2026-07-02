@@ -47,6 +47,7 @@
       passage: read(node, "Passage", ""),
       seedDate: read(node, "SeedDate", ""),
       status: read(node, "Status", "active"),
+      imaging: read(node, "Imaging", ""),
       parentNodeId: read(node, "ParentNodeId", ""),
       parentLabel: read(node, "ParentLabel", ""),
       // Provenance / source-tracking (drive the conflict + ground-truth warnings).
@@ -1281,7 +1282,76 @@
       (carried ? " (kept " + carried + " confirmed/dismissed)" : "") + " — see “Needs confirmation”.", false);
   }
 
+  // A microscopy-imaging CSV (from imaging_consolidate.py) vs. a vessel/donor CSV.
+  function isImagingCsv(text) {
+    var first = String(text || "").split(/\r?\n/, 1)[0].toLowerCase();
+    return first.indexOf("matchedvessel") >= 0 && first.indexOf("images") >= 0 && first.indexOf("condition") >= 0;
+  }
+  function eyesOk(a, b) {
+    a = String(a || "").toLowerCase(); b = String(b || "").toLowerCase();
+    var blank = function (e) { return e === "" || e === "unknown" || e === "ou"; };
+    return blank(a) || blank(b) || a === b;
+  }
+  // Import the brightfield-imaging sessions (parsed from filenames — source 4) and
+  // fuse a per-vessel imaging summary onto each matched vessel node: how many
+  // sessions/fields and the observation date span. Persisted on the node (survives
+  // like any culture field). Names are lossy, so matching is by donor core + passage.
+  function runImagingImport(text) {
+    var rows = LOGIC().parseCsv(text) || [];
+    if (rows.length < 2) { showImportStatus("No imaging rows found in that CSV.", true); return; }
+    var hdr = rows[0].map(function (h) { return String(h || "").trim().toLowerCase(); });
+    function col(r, name) { var i = hdr.indexOf(name); return i >= 0 && i < r.length ? String(r[i] == null ? "" : r[i]).trim() : ""; }
+
+    // index vessel nodes by their donor-identity aliases + passage
+    var nodes = allCultureVessels().map(function (n) {
+      var id = LOGIC().donorIdentity(read(n, "Donor", ""));
+      return { node: n, aliases: id.aliases, eye: read(n, "Eye", ""), passage: String(read(n, "Passage", "")).replace(/\D/g, ""), imgs: 0, sessions: 0, dates: {} };
+    });
+    var aliasIndex = {};
+    nodes.forEach(function (nn, i) { nn.aliases.forEach(function (a) { (aliasIndex[a] = aliasIndex[a] || []).push(i); }); });
+
+    var totalSessions = 0, matchedSessions = 0, gapSessions = 0;
+    for (var r = 1; r < rows.length; r++) {
+      var row = rows[r];
+      if (!row || !row.length) continue;
+      var donor = col(row, "donor"); if (!donor) continue;
+      totalSessions++;
+      var sid = LOGIC().donorIdentity(donor);
+      var pass = col(row, "passage").replace(/\D/g, "");
+      var date = col(row, "date");
+      var imgs = parseInt(col(row, "images"), 10) || 0;
+      var seen = {}, hit = false;
+      sid.aliases.forEach(function (a) {
+        (aliasIndex[a] || []).forEach(function (i) {
+          if (seen[i]) return; seen[i] = true;
+          var nn = nodes[i];
+          if (nn.passage !== pass) return;
+          if (!eyesOk(nn.eye, col(row, "eye"))) return;
+          nn.imgs += imgs; nn.sessions++; if (date) nn.dates[date] = true; hit = true;
+        });
+      });
+      if (hit) matchedSessions++; else gapSessions++;
+    }
+
+    var covered = 0;
+    nodes.forEach(function (nn) {
+      if (nn.sessions) {
+        covered++;
+        var ds = Object.keys(nn.dates).sort();
+        var span = ds.length ? (shortDate(ds[0]) + (ds.length > 1 ? "→" + shortDate(ds[ds.length - 1]) : "")) : "";
+        write(nn.node, "Imaging", nn.sessions + " session" + (nn.sessions === 1 ? "" : "s") + " · " + nn.imgs + " fields" + (span ? " · " + span : ""));
+      } else {
+        write(nn.node, "Imaging", "");   // clear on re-import
+      }
+    });
+    if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+    renderView();
+    showImportStatus("Imaging: " + covered + " vessel" + (covered === 1 ? "" : "s") + " matched to microscopy · " +
+      matchedSessions + " of " + totalSessions + " sessions linked · " + gapSessions + " imaged with no vessel record.", false);
+  }
+
   function runCsvImport(text) {
+    if (isImagingCsv(text)) { runImagingImport(text); return; }
     if (isDonorCsv(text)) { runDonorImport(text); return; }
     var parsed = LOGIC().importCsvToDrafts(text);
     if (!parsed.rowCount) { showImportStatus("No data rows found in that CSV.", true); return; }
@@ -1476,6 +1546,9 @@
       var t = [(n > 1 ? n + "× " : "") + pass + (v.seedDate ? " · " + shortDate(v.seedDate) : ""), LOGIC().vesselTypeFromIcon(v.iconId), v.status || "active"];
       if (n > 1) t.push(n + " flasks at this passage on one date — a split, or duplicate entries");
       if (uncertain) t.push("best guess (source marked uncertain)");
+      var imaging = "";
+      c.members.forEach(function (m) { if (m.imaging && !imaging) imaging = m.imaging; });
+      if (imaging) t.push("🔬 imaged: " + imaging);
       nodes +=
         '<g class="wlpc-tl-node' + (anyFlag ? " is-flagged" : "") + (n > 1 ? " is-cluster" : "") + '" data-node-id="' + esc(v.nodeId) + '"' +
           (n > 1 ? ' data-cluster-members="' + esc(c.members.map(function (m) { return m.nodeId; }).join(",")) + '"' : "") +
@@ -1486,6 +1559,7 @@
           '<text class="wlpc-tl-date" y="' + (NR + 12) + '" text-anchor="middle">' + (v.seedDate ? esc(shortDate(v.seedDate)) : "—") + "</text>" +
           (n > 1 ? '<circle class="wlpc-tl-count-bg" cx="' + (NR - 1) + '" cy="-' + (NR - 3) + '" r="8"/><text class="wlpc-tl-count" x="' + (NR - 1) + '" y="-' + (NR - 6) + '" text-anchor="middle">' + n + "</text>" : "") +
           (uncertain ? '<text class="wlpc-tl-guess" x="-' + (NR - 1) + '" y="-' + (NR - 5) + '" text-anchor="end">?</text>' : "") +
+          (imaging ? '<text class="wlpc-tl-img" x="' + (NR - 2) + '" y="' + (NR + 1) + '" text-anchor="middle">🔬</text>' : "") +
           (anyFlag ? '<circle class="wlpc-tl-flag" cx="-' + (NR - 2) + '" cy="' + (NR - 3) + '" r="4"/>' : "") +
         "</g>";
     });
