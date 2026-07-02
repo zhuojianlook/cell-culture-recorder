@@ -86,6 +86,57 @@
     return name || (read(n, "Donor", "") + " " + read(n, "Eye", "")).trim() || ("Vessel " + (n.dataset.nodeId || ""));
   }
 
+  // ── Multiwell-plate per-well records ────────────────────────────────────────
+  // A plate keeps an entry per SEEDED well in node.dataset.cultureWells (JSON) —
+  // mirroring cultureImagingSessions, so it persists with the canvas for free.
+  var WELL_FIELDS = ["well", "donor", "eye", "passage", "status", "seedDate", "notes"];
+  function isPlateNode(n) { return !!(n && window.isMultiWellPlateNode && window.isMultiWellPlateNode(n)); }
+  function plateWellCount(n) { return (n && window.getPlateWellCount && window.getPlateWellCount(n.dataset.iconId)) || 0; }
+  function plateWellIds(n) { return (window.getPlateWellIds && window.getPlateWellIds(plateWellCount(n))) || []; }
+  function wellFilled(w) { return !!(w && w.well && (w.donor || w.eye || w.passage || w.status || w.seedDate || w.notes)); }
+  function normWellId(id) { return (window.parseWellId ? window.parseWellId(id).text : String(id || "")).toUpperCase(); }
+  function parseWells(node) {
+    try { var a = JSON.parse((node && node.dataset.cultureWells) || "[]"); return Array.isArray(a) ? a.filter(wellFilled) : []; }
+    catch (e) { return []; }
+  }
+  function writeWells(node, arr) {
+    var clean = (arr || []).filter(wellFilled);
+    if (clean.length) {
+      node.dataset.cultureWells = JSON.stringify(clean);
+      var donors = {}; clean.forEach(function (w) { if (w.donor) donors[String(w.donor).trim().toLowerCase()] = true; });
+      var nd = Object.keys(donors).length;
+      write(node, "WellsSummary", clean.length + " well" + (clean.length === 1 ? "" : "s") + " · " + nd + " donor" + (nd === 1 ? "" : "s"));
+    } else {
+      delete node.dataset.cultureWells;
+      write(node, "WellsSummary", "");
+    }
+  }
+  function compareWellIds_(a, b) {
+    var pa = window.parseWellId ? window.parseWellId(a) : { row: 0, col: 0 };
+    var pb = window.parseWellId ? window.parseWellId(b) : { row: 0, col: 0 };
+    return (pa.row - pb.row) || (pa.col - pb.col);
+  }
+  // Idempotent, non-destructive migration: a plate still holding one legacy scalar
+  // record becomes well A1 the first time it's opened; the scalar fields are KEPT
+  // so the canvas label/badges keep working. No-op for non-plates / already-migrated.
+  function ensureWellsMigrated(node) {
+    if (!isPlateNode(node) || node.dataset.cultureWells != null) return;
+    var donor = read(node, "Donor", ""), eye = read(node, "Eye", ""), passage = read(node, "Passage", "");
+    var seed = read(node, "SeedDate", ""), notes = read(node, "Notes", ""), status = read(node, "Status", "");
+    if (donor || eye || passage || seed || notes) {
+      writeWells(node, [{ well: (plateWellIds(node)[0] || "A1"), donor: donor, eye: eye, passage: passage,
+        status: status || "active", seedDate: seed, notes: notes }]);
+    } else {
+      node.dataset.cultureWells = "[]";
+    }
+  }
+  // A plate's seeded wells as record objects (for the Records table + timeline).
+  function plateWellRecords(node) {
+    ensureWellsMigrated(node);
+    return LOGIC().wellRecordsToRecords(node.dataset.nodeId || "", node.dataset.iconId || "", parseWells(node), recordOf(node))
+      .sort(function (a, b) { return compareWellIds_(a.well, b.well); });
+  }
+
   var modal = null;
   var current = null;
 
@@ -353,6 +404,9 @@
 
   function openRecord(node) {
     if (!node) return;
+    // A multiwell plate opens the per-well grid editor instead of the single-vessel
+    // form; the single-vessel body below is untouched for flasks/dishes/cell-lines.
+    if (isPlateNode(node)) { openPlateRecord(node); return; }
     build();
     current = node;
     val("wlpcRecVessel").textContent = vesselTypeFromIcon(node);
@@ -470,6 +524,140 @@
     hide();
     // Keep the recorder grid/tree in sync immediately after an edit.
     if (view && view.style.display !== "none") renderView();
+  }
+
+  // ── Per-well plate editor (a 2×N well grid; each well is its own entry) ──────
+  var plateModal = null, plateNode = null, plateDraft = [], plateSel = "";
+  function pval(id) { return plateModal.querySelector("#" + id); }
+  function draftWell(id) { var t = normWellId(id), f = null; plateDraft.forEach(function (w) { if (normWellId(w.well) === t) f = w; }); return f; }
+  function buildPlateModal() {
+    if (plateModal) return plateModal;
+    var b = document.createElement("div");
+    b.className = "modal-backdrop modal-backdrop--center is-hidden";
+    b.style.zIndex = "10000";
+    b.innerHTML =
+      '<div class="modal" style="margin-top:7vh;max-width:600px;width:600px">' +
+        '<div class="modal__header" style="display:flex;align-items:center;justify-content:space-between">' +
+          '<h3 style="margin:0">Plate wells</h3>' +
+          '<span id="wlpwType" style="font-size:.8125rem;color:var(--muted,#8e8e93)"></span>' +
+        '</div>' +
+        '<div class="modal__body" style="display:block">' +
+          '<div style="font-size:.74rem;color:#8e8e93;margin-bottom:8px">Click a well to edit its entry — each well can hold its own donor / passage / status.</div>' +
+          '<div id="wlpwGrid" style="display:grid;gap:6px;margin-bottom:14px"></div>' +
+          '<div id="wlpwForm" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+            '<div class="field" style="grid-column:1/-1"><label id="wlpwSelLbl" style="font-weight:700;color:#64d2ff;margin:0"></label></div>' +
+            fieldText("wlpwDonor", "Donor / culture name") +
+            fieldSelect("wlpwEye", "Eye", EYES) +
+            fieldNum("wlpwPassage", "Passage #") +
+            fieldSelect("wlpwStatus", "Status", STATUSES) +
+            fieldDate("wlpwSeedDate", "Seed date") +
+            '<div class="field"><label>&nbsp;</label><button type="button" id="wlpwClear" class="btn" style="width:100%">Clear this well</button></div>' +
+            '<div class="field" style="grid-column:1/-1"><label for="wlpwNotes">Notes</label>' +
+              '<textarea id="wlpwNotes" class="modal__input" rows="2" style="resize:vertical"></textarea></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="modal__footer" style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">' +
+          '<button type="button" id="wlpwCancel" class="btn">Close</button>' +
+          '<button type="button" id="wlpwSave" class="btn btn--primary">Save wells</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(b);
+    plateModal = b;
+    b.addEventListener("click", function (e) { if (e.target === b) hidePlate(); });
+    pval("wlpwCancel").addEventListener("click", hidePlate);
+    pval("wlpwSave").addEventListener("click", savePlate);
+    pval("wlpwClear").addEventListener("click", clearWell);
+    ["wlpwDonor", "wlpwEye", "wlpwPassage", "wlpwStatus", "wlpwSeedDate", "wlpwNotes"].forEach(function (id) {
+      var el = pval(id);
+      el.addEventListener("input", readFormIntoDraft);
+      el.addEventListener("change", function () { readFormIntoDraft(); renderWellGrid(); });
+    });
+    return plateModal;
+  }
+  function openPlateRecord(node, wellToSelect) {
+    if (!node) return;
+    ensureWellsMigrated(node);
+    buildPlateModal();
+    plateNode = node;
+    plateDraft = parseWells(node).map(function (w) { var o = {}; WELL_FIELDS.forEach(function (k) { o[k] = w[k] == null ? "" : String(w[k]); }); return o; });
+    pval("wlpwType").textContent = vesselTypeFromIcon(node);
+    var spec = (window.plateGridSpec && window.plateGridSpec(String(plateWellCount(node)))) || { cols: 3 };
+    pval("wlpwGrid").style.gridTemplateColumns = "repeat(" + Math.max(1, spec.cols) + ", 1fr)";
+    var ids = plateWellIds(node);
+    plateSel = normWellId(wellToSelect || (plateDraft[0] && plateDraft[0].well) || ids[0] || "A1");
+    renderWellGrid();
+    loadWellIntoForm();
+    plateModal.classList.remove("is-hidden");
+    plateModal.style.display = "flex";
+  }
+  function renderWellGrid() {
+    if (!plateNode) return;
+    var grid = pval("wlpwGrid");
+    grid.innerHTML = plateWellIds(plateNode).map(function (id) {
+      var w = draftWell(id), filled = wellFilled(w), sel = normWellId(id) === plateSel;
+      var color = filled ? statusColor(w.status || "active") : "transparent";
+      return '<button type="button" class="wlpw-well' + (filled ? " is-filled" : "") + (sel ? " is-sel" : "") +
+        '" data-well="' + esc(id) + '" style="border-left:3px solid ' + color + '">' +
+        '<span class="wlpw-well-id">' + esc(id) + '</span>' +
+        (filled
+          ? '<span class="wlpw-well-donor">' + esc(w.donor || "—") + (w.passage !== "" ? " P" + esc(w.passage) : "") + '</span>'
+          : '<span class="wlpw-well-empty">+</span>') +
+        '</button>';
+    }).join("");
+    Array.prototype.forEach.call(grid.querySelectorAll(".wlpw-well"), function (btn) {
+      btn.addEventListener("click", function () { selectWell(btn.getAttribute("data-well")); });
+    });
+  }
+  function selectWell(id) { readFormIntoDraft(); plateSel = normWellId(id); renderWellGrid(); loadWellIntoForm(); }
+  function loadWellIntoForm() {
+    var w = draftWell(plateSel) || {};
+    pval("wlpwSelLbl").textContent = "Well " + plateSel;
+    pval("wlpwDonor").value = w.donor || "";
+    pval("wlpwEye").value = w.eye || "unknown";
+    pval("wlpwPassage").value = w.passage || "";
+    pval("wlpwStatus").value = w.status || "active";
+    pval("wlpwSeedDate").value = w.seedDate || "";
+    pval("wlpwNotes").value = w.notes || "";
+  }
+  function readFormIntoDraft() {
+    if (!plateSel || !plateModal) return;
+    var entry = { well: plateSel, donor: pval("wlpwDonor").value.trim(), eye: pval("wlpwEye").value,
+      passage: pval("wlpwPassage").value.trim(), status: pval("wlpwStatus").value,
+      seedDate: pval("wlpwSeedDate").value, notes: pval("wlpwNotes").value.trim() };
+    var i = -1; plateDraft.forEach(function (w, idx) { if (normWellId(w.well) === plateSel) i = idx; });
+    if (i >= 0) plateDraft[i] = entry; else plateDraft.push(entry);
+  }
+  function clearWell() {
+    plateDraft = plateDraft.filter(function (w) { return normWellId(w.well) !== plateSel; });
+    loadWellIntoForm();
+    renderWellGrid();
+  }
+  function savePlate() {
+    if (!plateNode) { hidePlate(); return; }
+    readFormIntoDraft();
+    writeWells(plateNode, plateDraft);
+    // Keep the plate's scalar default in sync with the lowest-index seeded well, so
+    // the canvas label + badges + donor reconciliation keep working.
+    var wells = parseWells(plateNode).slice().sort(function (a, b) { return compareWellIds_(a.well, b.well); });
+    var first = wells[0];
+    if (first) {
+      write(plateNode, "Donor", first.donor || "");
+      write(plateNode, "Eye", first.eye || "");
+      write(plateNode, "Passage", first.passage || "");
+      write(plateNode, "Status", first.status || "active");
+      write(plateNode, "SeedDate", first.seedDate || "");
+    }
+    if (typeof window.wlpMarkCanvasDirty === "function") { try { window.wlpMarkCanvasDirty(); } catch (e) { /* ignore */ } }
+    try { renderBadges(); } catch (e) { /* ignore */ }
+    if (typeof window.wlpPaintPlateGlyphRecords === "function") { try { window.wlpPaintPlateGlyphRecords(plateNode); } catch (e) { /* ignore */ } }
+    hidePlate();
+    if (view && view.style.display !== "none") renderView();
+  }
+  function hidePlate() {
+    if (!plateModal) return;
+    plateModal.classList.add("is-hidden");
+    plateModal.style.display = "none";
+    plateNode = null; plateDraft = []; plateSel = "";
   }
 
   // Status → a small colour for pills/badges/grid/tree (shared so all surfaces
@@ -1254,6 +1442,41 @@
       );
     }
 
+    // A multiwell plate expands to a summary row + one sub-row per seeded well.
+    function plateSummaryRow(n, wr) {
+      return '<tr data-node-id="' + esc(n.dataset.nodeId) + '" class="wlpc-plate-sum">' +
+        '<td class="wlpc-col-label">' + esc(nodeLabel(n)) + '</td>' +
+        '<td class="wlpc-col-p"></td>' +
+        '<td>' + esc(vesselTypeFromIcon(n)) + '</td>' +
+        '<td colspan="4"><span class="wlpc-chip">' + wr.length + " / " + plateWellCount(n) + " wells seeded</span> " +
+          '<span class="wlpc-plate-hint">click a well row to edit, or this row for the grid</span></td>' +
+        '<td class="wlpc-col-warn"></td>' +
+        '</tr>';
+    }
+    function wellSubRow(n, r) {
+      var status = r.status || "active";
+      return '<tr data-plate-id="' + esc(n.dataset.nodeId) + '" data-well="' + esc(r.well) + '" class="wlpc-well-row">' +
+        '<td class="wlpc-col-label"><span class="wlpc-well-tag">' + esc(r.well) + '</span> ' + esc(r.donor || "—") +
+          (r.eye && r.eye !== "unknown" ? " " + esc(r.eye) : "") + '</td>' +
+        '<td class="wlpc-col-p">' + (r.passage !== "" ? "P" + esc(r.passage) : "") + '</td>' +
+        '<td></td>' +
+        '<td><span class="wlpc-pill" style="color:' + statusColor(status) + '">' + esc(status.charAt(0).toUpperCase() + status.slice(1)) + '</span></td>' +
+        '<td>' + esc(r.medium || "") + '</td>' +
+        '<td class="wlpc-col-date">' + esc(r.seedDate || "") + '</td>' +
+        '<td></td>' +
+        '<td class="wlpc-col-warn"></td>' +
+        '</tr>';
+    }
+    function nodeRows(n) {
+      try {
+        if (isPlateNode(n)) {
+          var wr = plateWellRecords(n);
+          if (wr.length) return plateSummaryRow(n, wr) + wr.map(function (r) { return wellSubRow(n, r); }).join("");
+        }
+      } catch (e) { /* fall back to a plain vessel row — never break the whole table */ }
+      return vesselRow(n);
+    }
+
     var bodyRows = groups.map(function (g) {
       var warnN = g.nodes.filter(function (n) { return warningsFor(n, peers).length; }).length;
       var countChip = '<span class="wlpc-chip">' + g.nodes.length + (g.nodes.length === 1 ? " vessel" : " vessels") + "</span>";
@@ -1262,7 +1485,7 @@
         '<tr class="wlpc-group"><td colspan="8">' +
           '<span class="wlpc-group__name">' + esc(g.label) + "</span>" + countChip + warnChip +
         "</td></tr>";
-      return header + g.nodes.map(vesselRow).join("");
+      return header + g.nodes.map(nodeRows).join("");
     }).join("");
 
     body.innerHTML =
@@ -1270,18 +1493,27 @@
         th("Vessel / label") + th("P#") + th("Type") + th("Status") + th("Medium") +
         th("Seed date") + th("Lineage parent") + th("⚠") +
       "</tr></thead><tbody>" + bodyRows + "</tbody></table>";
+    function jumpTo(plateId, cb) {
+      if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("cell-culture");
+      syncView();
+      setTimeout(function () { if (typeof window.wlpFocusNode === "function") window.wlpFocusNode(plateId); cb(); }, 80);
+    }
     Array.prototype.forEach.call(body.querySelectorAll("tr[data-node-id]"), function (tr) {
       tr.addEventListener("click", function () {
         var id = tr.getAttribute("data-node-id");
         var node = document.querySelector('.drop[data-node-id="' + id + '"]');
         if (!node) return;
-        // Jump to the Cell Culture timeline, focus the vessel, open its record.
-        if (typeof window.wlpSetWorkspace === "function") window.wlpSetWorkspace("cell-culture");
-        syncView();
-        setTimeout(function () {
-          if (typeof window.wlpFocusNode === "function") window.wlpFocusNode(id);
-          openRecord(node);
-        }, 80);
+        jumpTo(id, function () { openRecord(node); });
+      });
+    });
+    // Per-well sub-rows open the plate editor focused on that well.
+    Array.prototype.forEach.call(body.querySelectorAll("tr[data-plate-id]"), function (tr) {
+      tr.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var pid = tr.getAttribute("data-plate-id"), well = tr.getAttribute("data-well");
+        var node = document.querySelector('.drop[data-node-id="' + pid + '"]');
+        if (!node) return;
+        jumpTo(pid, function () { openPlateRecord(node, well); });
       });
     });
   }

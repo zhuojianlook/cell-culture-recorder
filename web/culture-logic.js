@@ -300,12 +300,37 @@
     if (!q) return true;
     record = record || {};
     var hay = [
-      record.donor, record.label, record.eye,
+      record.donor, record.label, record.eye, record.well,
       record.passage !== "" && record.passage != null ? "p" + record.passage : "",
       record.medium, record.status, record.seedDate,
       vesselTypeFromIcon(record.iconId),
     ].join(" ").toLowerCase();
     return hay.indexOf(q) >= 0;
+  }
+
+  // Fan a multiwell plate's per-well entries out into record objects shaped like
+  // recordOf(), so the Records table + timeline can treat each SEEDED well as its
+  // own vessel. A well inherits the plate's base record wherever its own field is
+  // blank; its nodeId is namespaced `plateId#well`, and it carries no lineage
+  // parent (each well is its own cycle-safe root).
+  function wellRecordsToRecords(plateNodeId, iconId, wells, baseRecord) {
+    baseRecord = baseRecord || {};
+    var pid = str(plateNodeId);
+    return (wells || []).filter(function (w) { return w && w.well; }).map(function (w) {
+      var pick = function (k) { var v = str(w[k]).trim(); return v !== "" ? v : str(baseRecord[k]).trim(); };
+      var donor = pick("donor");
+      var eye = pick("eye") || "unknown";
+      var passage = str(w.passage).trim() !== "" ? str(w.passage).trim() : str(baseRecord.passage).trim();
+      var label = (donor + " " + (eye && eye !== "unknown" ? eye : "") + " " +
+        (passage !== "" ? "P" + passage + " " : "") + w.well).replace(/\s+/g, " ").trim();
+      return {
+        nodeId: pid + "#" + w.well, plateNodeId: pid, isWell: true, well: w.well, iconId: iconId,
+        donor: donor, eye: eye, passage: passage, seedDate: pick("seedDate"),
+        status: pick("status") || "active", medium: str(baseRecord.medium || ""),
+        notes: str(w.notes || ""), label: label, parentNodeId: "", parentLabel: "",
+        imagingSessions: [], imaging: ""
+      };
+    });
   }
 
   // Grid sort: donor, then eye, then passage (numeric), then seed date.
@@ -912,6 +937,7 @@
     EVENT_TYPES: EVENT_TYPES,
     donorIdentity: donorIdentity,
     donorMatchQuality: donorMatchQuality,
+    wellRecordsToRecords: wellRecordsToRecords,
     reconcileDonors: reconcileDonors,
     parseEvents: parseEvents,
     statusFromEvent: statusFromEvent,

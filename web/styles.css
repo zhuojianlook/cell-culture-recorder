@@ -5399,6 +5399,26 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-rc-row.is-confirmed { border-left: 2px solid rgba(48,209,88,.5); padding-left: 12px; }
 .wlpc-rc-appliedto { font-size: .72rem; color: #30d158; font-weight: 600; }
 
+/* ── Multiwell-plate per-well records ─────────────────────────────────────── */
+/* the well-grid picker in the plate editor (looks like the physical plate) */
+.wlpw-well { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; min-height: 42px; padding: 5px 8px; border-radius: 8px; border: 1px solid rgba(142,142,147,.28); background: rgba(255,255,255,.03); color: var(--text); cursor: pointer; text-align: left; transition: background 120ms ease, border-color 120ms ease; }
+.wlpw-well:hover { background: rgba(255,255,255,.08); }
+.wlpw-well.is-filled { background: rgba(120,170,255,.08); }
+.wlpw-well.is-sel { border-color: #64d2ff; box-shadow: 0 0 0 1px rgba(100,210,255,.5) inset; }
+.wlpw-well-id { font-size: .7rem; font-weight: 700; color: #8e8e93; }
+.wlpw-well.is-filled .wlpw-well-id, .wlpw-well.is-sel .wlpw-well-id { color: #cfe3ff; }
+.wlpw-well-donor { font-size: .74rem; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.wlpw-well-empty { font-size: 1rem; color: #48484a; line-height: 1; }
+/* table: plate summary + per-well sub-rows */
+.wlpc-plate-sum > td { border-top: 1px solid rgba(255,255,255,.06); }
+.wlpc-plate-hint { font-size: .68rem; color: var(--muted); margin-left: 8px; }
+.wlpc-well-row > td { background: rgba(255,255,255,.014); }
+.wlpc-well-row .wlpc-col-label { padding-left: 22px; }
+.wlpc-well-tag { display: inline-block; min-width: 26px; text-align: center; font-size: .64rem; font-weight: 700; color: #cfe3ff; background: rgba(120,170,255,.16); border-radius: 5px; padding: 1px 5px; margin-right: 6px; }
+/* canvas plate glyph: seeded wells + badge (Stage 3) */
+.plate-glyph-well.is-seeded { opacity: 1; }
+.plate-records-badge { pointer-events: auto; cursor: pointer; }
+
 /* ── Cell Culture map: tidy-timeline lane bands + vessel cards ─────────────── */
 .culture-lanes { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
 .culture-lane { position: absolute; left: 0; right: 0; border-top: 1px solid rgba(255,255,255,.05); }

@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.55", date: "2026-07-02", changes: [
+      "Multiwell plates: each well can now be its own entry. Double-click a plate (in the Cell Culture Records or on the canvas) to open a well-grid editor laid out like the physical plate (a 6-well plate is 2×3); click any well to record its own donor / eye / passage / status / seed date / notes. The Records table shows a plate as a “N / M wells seeded” summary that expands to one row per seeded well. A plate that already had a single record keeps it (it becomes well A1); nothing is lost. (Timeline + on-canvas well colouring to follow.)",
+    ] },
     { version: "0.2.54", date: "2026-07-02", changes: [
       "Passage branch points are now shown properly: when a vessel is split into several daughter vessels, each daughter is drawn as its own node with its OWN independent line back to the parent, so a 1→N split fans out as a branch instead of collapsing into a single merged link. Vessels that take part in a lineage are shown individually; the ×N badge is now reserved for genuine duplicate/parallel entries with no lineage.",
     ] },

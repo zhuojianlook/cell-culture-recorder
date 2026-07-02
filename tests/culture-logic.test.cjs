@@ -151,6 +151,31 @@ test("reconcileDonors: a pooled donor is compatible with either cornea (no false
   assert.equal(r4.fuzzy[0].cands[0].quality, "exact", "OD donor finds its OD vessel, not flagged");
 });
 
+test("wellRecordsToRecords fans a plate's wells into per-well records", () => {
+  const base = { donor: "6769", eye: "OD", passage: "0", status: "active", medium: "DMEM", seedDate: "2026-06-01" };
+  const wells = [
+    { well: "A1", donor: "6769", eye: "OD", passage: "2", status: "active", seedDate: "2026-06-10", notes: "n1" },
+    { well: "B3", donor: "5046", eye: "OS", passage: "1" }, // different donor; inherits nothing it doesn't set
+  ];
+  const recs = L.wellRecordsToRecords("node-7", "plate_6", wells, base);
+  assert.equal(recs.length, 2);
+  assert.equal(recs[0].nodeId, "node-7#A1", "nodeId is plateId#well");
+  assert.equal(recs[0].isWell, true);
+  assert.equal(recs[0].well, "A1");
+  assert.equal(recs[0].parentNodeId, "", "each well is its own root (no lineage parent)");
+  assert.equal(recs[1].donor, "5046", "well B3 keeps its own donor");
+  assert.equal(recs[1].eye, "OS");
+  // a well with a blank field inherits the plate base
+  const inh = L.wellRecordsToRecords("n", "plate_6", [{ well: "A1", passage: "3" }], base);
+  assert.equal(inh[0].donor, "6769", "blank donor inherits the plate default");
+  assert.equal(inh[0].seedDate, "2026-06-01", "blank seedDate inherits the plate default");
+  assert.equal(inh[0].passage, "3", "own passage wins");
+  // empty input
+  assert.deepEqual(L.wellRecordsToRecords("n", "plate_6", [], base), []);
+  // searching by well id works
+  assert.equal(L.recordMatchesQuery(recs[0], "A1"), true);
+});
+
 test("cultureLabelSummary builds the canvas identity", () => {
   assert.equal(L.cultureLabelSummary({ donor: "6769", eye: "OD", passage: "2" }), "6769 OD P2");
   assert.equal(L.cultureLabelSummary({ donor: "6769", eye: "unknown", passage: "0" }), "6769 P0");
