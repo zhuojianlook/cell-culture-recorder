@@ -917,6 +917,25 @@ window.wlpMergeCultureNodes = function (survivorId, victimIds) {
   return removed;
 };
 window.wlpActiveWorkspace = function () { return activeWorkspaceId; };
+// Open a microscopy image file so the user can VIEW it — in the OS default app
+// (Preview/Fiji/Nikon), falling back to revealing it in Finder. Uses the bundled
+// tauri-plugin-opener. NEVER copies, downloads, or renames the file.
+window.wlpOpenImage = async function (filePath) {
+  if (!filePath) return { ok: false, error: "no path" };
+  const invoke = getTauriInvoke();
+  if (!invoke) { try { window.open("file://" + filePath); } catch (e) { /* */ } return { ok: false, error: "not-desktop" }; }
+  try {
+    await invoke("plugin:opener|open_path", { path: filePath });
+    return { ok: true, mode: "open" };
+  } catch (e1) {
+    try {
+      await invoke("plugin:opener|reveal_item_in_dir", { path: filePath });
+      return { ok: true, mode: "reveal" };
+    } catch (e2) {
+      return { ok: false, error: String((e2 && e2.message) || e2) };
+    }
+  }
+};
 window.wlpSetWorkspace = function (id) { try { setActiveWorkspace(id); } catch (e) { /* ignore */ } };
 // Open the (shared) Media Plan scheduler for a vessel node — lets the culture
 // editor schedule media changes / feeds with dates, recurrence and volume.

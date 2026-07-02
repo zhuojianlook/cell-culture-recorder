@@ -10,6 +10,10 @@
     "updater:default",
     "shell:default",
     {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "$HOME/**" }]
+    },
+    {
       "identifier": "shell:allow-execute",
       "allow": [{ "name": "binaries/api-server", "sidecar": true, "args": true }]
     },

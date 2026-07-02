@@ -48,6 +48,7 @@
       seedDate: read(node, "SeedDate", ""),
       status: read(node, "Status", "active"),
       imaging: read(node, "Imaging", ""),
+      imagingSessions: parseImagingSessions(node),
       parentNodeId: read(node, "ParentNodeId", ""),
       parentLabel: read(node, "ParentLabel", ""),
       // Provenance / source-tracking (drive the conflict + ground-truth warnings).
@@ -740,14 +741,15 @@
     var flags = LOGIC().lineageFlags(vesselRecords);
     var orphans = vesselRecords.filter(function (r) { return (flags[String(r.nodeId)] || {}).orphan; });
 
-    if (!donorsAll.length && !orphans.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+    if (!donorsAll.length && !orphans.length && !(imagingPending && imagingPending.length)) { box.style.display = "none"; box.innerHTML = ""; return; }
 
     var active = donorsAll.filter(function (d) { return !d._dismissed && !d.confirmedVessel; });
     var rec = LOGIC().reconcileDonors(active, vesselRecords);
     var fuzzy = rec.fuzzy;
     var confirmedCount = donorsAll.filter(function (d) { return d.confirmedVessel; }).length;
     var conflicts = donorsAll.filter(function (d) { return !d._dismissed && donorConflicts(d).length; });
-    var needCount = fuzzy.length + orphans.length + conflicts.length;
+    var imgGroups = buildImagingGroups(vesselRecords);
+    var needCount = fuzzy.length + orphans.length + conflicts.length + imgGroups.length;
 
     box.style.display = "";
     if (reconcileCollapsed) {
@@ -834,6 +836,32 @@
       html += '</div>';
     }
 
+    // Section 2b — uncertain microscopy image matches (typos / gaps): the parsed
+    // filename didn't confidently match a vessel. Confirm the suggested vessel or
+    // pick the right one (a name correction; the real files are never renamed).
+    if (imgGroups.length) {
+      html += '<div class="wlpc-rc-sec"><div class="wlpc-rc-sec-hd">🔬 Microscopy — uncertain image matches, confirm or correct (' + imgGroups.length + ')</div>';
+      imgGroups.slice(0, 20).forEach(function (g) {
+        var dates = g.sessions.map(function (s) { return s.date; }).filter(Boolean).sort();
+        var span = dates.length ? (shortDate(dates[0]) + (dates.length > 1 ? "→" + shortDate(dates[dates.length - 1]) : "")) : "";
+        var hint = g.ambiguous === "yes" ? "ambiguous — near more than one donor, choose carefully"
+          : (g.nearest ? "likely typo — nearest vessel donor is " + esc(g.nearest) : "no matching vessel — imaged but not in the culture log");
+        html += '<div class="wlpc-rc-row">' +
+          '<div class="wlpc-rc-main"><span class="wlpc-rc-id">' + esc(g.donor) + '</span>' +
+            (g.passage !== "" ? ' <span class="wlpc-rc-eye">P' + esc(g.passage) + '</span>' : '') +
+            ' <span class="wlpc-rc-gt">' + g.sessions.length + ' session' + (g.sessions.length === 1 ? "" : "s") + ' · ' + g.images + ' fields' + (span ? " · " + span : "") + '</span>' +
+            '<span class="wlpc-rc-hint">' + hint + '</span></div>' +
+          '<div class="wlpc-rc-acts">' +
+            (g.target ? '<button type="button" class="wlpc-rc-btn is-go" data-img-assign="' + esc(g.key) + '" data-img-node="' + esc(g.target) + '">→ ' + esc(g.targetLabel) + '</button>' : '') +
+            '<select class="wlpc-rc-sel" data-img-pick="' + esc(g.key) + '"><option value="">— pick vessel —</option>' +
+              g.candidates.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.label) + '</option>'; }).join("") + '</select>' +
+            '<button type="button" class="wlpc-rc-btn" data-img-ignore="' + esc(g.key) + '">not a vessel</button>' +
+          '</div></div>';
+      });
+      if (imgGroups.length > 20) html += '<div class="wlpc-rc-more">…and ' + (imgGroups.length - 20) + ' more</div>';
+      html += '</div>';
+    }
+
     // Section 3/4 — informational, collapsed lists.
     html += infoSection("Donor records with no vessel", rec.donorsWithoutVessel.map(function (d) {
       return esc(d.donor) + (d.eye ? " " + esc(String(d.eye).toUpperCase()) : "") + (donorGtBits(d) ? ' · ' + esc(donorGtBits(d)) : "");
@@ -876,8 +904,14 @@
       if (dis != null) { dismissDonor(parseInt(dis, 10)); return; }
       var clr = t.getAttribute && t.getAttribute("data-rc-clearorphan");
       if (clr != null) { clearOrphanLabel(clr); return; }
+      var ia = t.getAttribute && t.getAttribute("data-img-assign");
+      if (ia != null) { assignImaging(ia, t.getAttribute("data-img-node")); return; }
+      var ig = t.getAttribute && t.getAttribute("data-img-ignore");
+      if (ig != null) { ignoreImaging(ig); return; }
     };
     box.onchange = function (e) {
+      var pick = e.target.getAttribute && e.target.getAttribute("data-img-pick");
+      if (pick != null && e.target.value) { assignImaging(pick, e.target.value); return; }
       var sel = e.target.getAttribute && e.target.getAttribute("data-rc-orphan");
       if (sel != null && e.target.value) setOrphanParent(sel, e.target.value);
     };
@@ -957,6 +991,70 @@
     if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
     renderView();
   }
+
+  // ── Microscopy: uncertain image→vessel matches (typos / gaps) to correct ──────
+  var imagingIgnored = {};   // group keys the user dismissed this session
+  function buildImagingGroups() {
+    if (!imagingPending || !imagingPending.length) return [];
+    var nodes = allCultureVessels();
+    var idxCP = {}, idxC = {};   // by core+passage and by core
+    nodes.forEach(function (n) {
+      var p = String(read(n, "Passage", "")).replace(/\D/g, "");
+      LOGIC().donorIdentity(read(n, "Donor", "")).aliases.forEach(function (a) {
+        (idxCP[a + "|" + p] = idxCP[a + "|" + p] || []).push(n);
+        (idxC[a] = idxC[a] || []).push(n);
+      });
+    });
+    var gm = {}, groups = [];
+    imagingPending.forEach(function (s) {
+      var key = s.donor + "|" + s.passage;
+      if (imagingIgnored[key]) return;
+      var g = gm[key];
+      if (!g) {
+        g = gm[key] = { key: key, donor: s.donor, passage: s.passage, eye: s.eye, nearest: s.nearest,
+          ambiguous: s.ambiguous, status: s.status, sessions: [], images: 0 };
+        groups.push(g);
+      }
+      g.sessions.push(s); g.images += (s.images || 0);
+    });
+    groups.forEach(function (g) {
+      g.target = ""; g.targetLabel = ""; g.candidates = [];
+      var cp = g.nearest ? (idxCP[g.nearest + "|" + g.passage] || []) : [];
+      if (cp.length) { g.target = cp[0].dataset.nodeId; g.targetLabel = recLabelOf(recordOf(cp[0])); }
+      var seen = {};
+      (g.nearest ? (idxC[g.nearest] || []) : []).forEach(function (n) {
+        var id = n.dataset.nodeId; if (seen[id]) return; seen[id] = true;
+        g.candidates.push({ id: id, label: recLabelOf(recordOf(n)) });
+      });
+    });
+    return groups;
+  }
+  // Assign an uncertain imaging group to a vessel (a NAME CORRECTION — the real
+  // image files are never touched). Sessions attach to the node, marked manual so
+  // they survive re-import.
+  function assignImaging(groupKey, nodeId) {
+    var node = nodeId && document.querySelector('.drop[data-node-id="' + nodeId + '"]');
+    if (!node) return;
+    var group = imagingPending.filter(function (s) { return (s.donor + "|" + s.passage) === groupKey; });
+    if (!group.length) return;
+    var existing = parseImagingSessions(node), have = {};
+    existing.forEach(function (s) { have[s.key] = true; });
+    group.forEach(function (s) {
+      if (have[s.key]) return;
+      existing.push({ key: s.key, date: s.date, cond: s.cond, images: s.images, path: s.path, donor: s.donor, passage: s.passage, manual: true });
+    });
+    writeImagingSessions(node, existing);
+    imagingPending = imagingPending.filter(function (s) { return (s.donor + "|" + s.passage) !== groupKey; });
+    if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+    renderView();
+    showImportStatus("Linked " + group.length + " image session" + (group.length === 1 ? "" : "s") + " to " + (read(node, "Donor", "") || "vessel") + " (files unchanged).", false);
+  }
+  function ignoreImaging(groupKey) {
+    imagingIgnored[groupKey] = true;
+    imagingPending = imagingPending.filter(function (s) { return (s.donor + "|" + s.passage) !== groupKey; });
+    renderView();
+  }
+
   // app.js calls this after the donor registry is hydrated from the backend.
   window.wlpOnDonorsHydrated = function () { try { if (view) renderReconcilePanel(); } catch (e) { /* ignore */ } };
 
@@ -1292,62 +1390,98 @@
     var blank = function (e) { return e === "" || e === "unknown" || e === "ou"; };
     return blank(a) || blank(b) || a === b;
   }
-  // Import the brightfield-imaging sessions (parsed from filenames — source 4) and
-  // fuse a per-vessel imaging summary onto each matched vessel node: how many
-  // sessions/fields and the observation date span. Persisted on the node (survives
-  // like any culture field). Names are lossy, so matching is by donor core + passage.
+  // ─── Microscopy imaging (source 4) ─────────────────────────────────────────
+  // A stable identity for an imaging session (used to remember user corrections).
+  function imgSessionKey(s) { return [s.date, s.donor, s.passage, s.cond].join("|"); }
+  function parseImagingSessions(node) {
+    try { var a = JSON.parse(node.dataset.cultureImagingSessions || "[]"); return Array.isArray(a) ? a : []; }
+    catch (e) { return []; }
+  }
+  function writeImagingSessions(node, arr) {
+    if (arr && arr.length) {
+      node.dataset.cultureImagingSessions = JSON.stringify(arr);
+      var dates = arr.map(function (s) { return s.date; }).filter(Boolean).sort();
+      var span = dates.length ? (shortDate(dates[0]) + (dates.length > 1 ? "→" + shortDate(dates[dates.length - 1]) : "")) : "";
+      var imgs = arr.reduce(function (n, s) { return n + (s.images || 0); }, 0);
+      write(node, "Imaging", arr.length + " session" + (arr.length === 1 ? "" : "s") + " · " + imgs + " fields" + (span ? " · " + span : ""));
+    } else {
+      delete node.dataset.cultureImagingSessions;
+      write(node, "Imaging", "");
+    }
+  }
+  // Uncertain / gap sessions awaiting user review (rebuilt on each import).
+  var imagingPending = [];
+
+  // Import brightfield-imaging sessions and attach each to its vessel. Only
+  // HIGH-CONFIDENCE (exact donor core + passage) matches auto-attach; typo /
+  // ambiguous / gap sessions go to imagingPending for the user to confirm or
+  // reassign. User corrections (sessions manually placed on a node) are preserved
+  // across re-import. The real image files are never touched.
   function runImagingImport(text) {
     var rows = LOGIC().parseCsv(text) || [];
     if (rows.length < 2) { showImportStatus("No imaging rows found in that CSV.", true); return; }
     var hdr = rows[0].map(function (h) { return String(h || "").trim().toLowerCase(); });
     function col(r, name) { var i = hdr.indexOf(name); return i >= 0 && i < r.length ? String(r[i] == null ? "" : r[i]).trim() : ""; }
 
-    // index vessel nodes by their donor-identity aliases + passage
-    var nodes = allCultureVessels().map(function (n) {
-      var id = LOGIC().donorIdentity(read(n, "Donor", ""));
-      return { node: n, aliases: id.aliases, eye: read(n, "Eye", ""), passage: String(read(n, "Passage", "")).replace(/\D/g, ""), imgs: 0, sessions: 0, dates: {} };
+    var nodes = allCultureVessels();
+    // preserve manual corrections: sessionKey -> nodeId, from the current nodes
+    var manualByKey = {};
+    nodes.forEach(function (n) {
+      parseImagingSessions(n).forEach(function (s) { if (s.manual && s.key) manualByKey[s.key] = n.dataset.nodeId || ""; });
     });
-    var aliasIndex = {};
-    nodes.forEach(function (nn, i) { nn.aliases.forEach(function (a) { (aliasIndex[a] = aliasIndex[a] || []).push(i); }); });
 
-    var totalSessions = 0, matchedSessions = 0, gapSessions = 0;
+    var nodeInfo = nodes.map(function (n) {
+      return { node: n, aliases: LOGIC().donorIdentity(read(n, "Donor", "")).aliases,
+        eye: read(n, "Eye", ""), passage: String(read(n, "Passage", "")).replace(/\D/g, ""), out: [] };
+    });
+    var aliasIndex = {}, byId = {};
+    nodeInfo.forEach(function (ni, i) {
+      byId[ni.node.dataset.nodeId || ""] = ni;
+      ni.aliases.forEach(function (a) { (aliasIndex[a] = aliasIndex[a] || []).push(i); });
+    });
+
+    imagingPending = [];
+    var total = 0, matched = 0, gap = 0;
     for (var r = 1; r < rows.length; r++) {
-      var row = rows[r];
-      if (!row || !row.length) continue;
+      var row = rows[r]; if (!row || !row.length) continue;
       var donor = col(row, "donor"); if (!donor) continue;
-      totalSessions++;
-      var sid = LOGIC().donorIdentity(donor);
-      var pass = col(row, "passage").replace(/\D/g, "");
-      var date = col(row, "date");
-      var imgs = parseInt(col(row, "images"), 10) || 0;
-      var seen = {}, hit = false;
-      sid.aliases.forEach(function (a) {
-        (aliasIndex[a] || []).forEach(function (i) {
-          if (seen[i]) return; seen[i] = true;
-          var nn = nodes[i];
-          if (nn.passage !== pass) return;
-          if (!eyesOk(nn.eye, col(row, "eye"))) return;
-          nn.imgs += imgs; nn.sessions++; if (date) nn.dates[date] = true; hit = true;
+      total++;
+      var s = { donor: donor, eye: col(row, "eye"), passage: col(row, "passage").replace(/\D/g, ""),
+        date: col(row, "date"), cond: col(row, "condition"), images: parseInt(col(row, "images"), 10) || 0,
+        status: col(row, "matchstatus"), nearest: col(row, "nearestvessel"), editDist: col(row, "editdist"),
+        ambiguous: col(row, "ambiguous"), path: col(row, "samplepath") || col(row, "samplefile") };
+      s.key = imgSessionKey(s);
+      var entry = { key: s.key, date: s.date, cond: s.cond, images: s.images, path: s.path, donor: s.donor, passage: s.passage };
+
+      // 1) honour a prior manual correction
+      if (manualByKey[s.key] && byId[manualByKey[s.key]]) {
+        byId[manualByKey[s.key]].out.push(Object.assign({ manual: true }, entry)); matched++; continue;
+      }
+      // 2) high-confidence auto-match: exact donor core + passage
+      if (s.status === "matched" || s.status === "fuzzy" || s.status === "donor-only") {
+        var sid = LOGIC().donorIdentity(s.donor), seen = {}, placed = false;
+        sid.aliases.forEach(function (a) {
+          (aliasIndex[a] || []).forEach(function (i) {
+            if (seen[i]) return; seen[i] = true;
+            var ni = nodeInfo[i];
+            if (ni.passage !== s.passage || !eyesOk(ni.eye, s.eye)) return;
+            ni.out.push(entry); placed = true;
+          });
         });
-      });
-      if (hit) matchedSessions++; else gapSessions++;
+        if (placed) { matched++; continue; }
+      }
+      // 3) uncertain / ambiguous / gap-with-suggestion -> review queue
+      if (s.status === "uncertain" || s.status === "ambiguous" || (s.status === "gap" && s.nearest)) {
+        imagingPending.push(s);
+      } else { gap++; }
     }
 
     var covered = 0;
-    nodes.forEach(function (nn) {
-      if (nn.sessions) {
-        covered++;
-        var ds = Object.keys(nn.dates).sort();
-        var span = ds.length ? (shortDate(ds[0]) + (ds.length > 1 ? "→" + shortDate(ds[ds.length - 1]) : "")) : "";
-        write(nn.node, "Imaging", nn.sessions + " session" + (nn.sessions === 1 ? "" : "s") + " · " + nn.imgs + " fields" + (span ? " · " + span : ""));
-      } else {
-        write(nn.node, "Imaging", "");   // clear on re-import
-      }
-    });
+    nodeInfo.forEach(function (ni) { if (ni.out.length) covered++; writeImagingSessions(ni.node, ni.out); });
     if (typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
     renderView();
-    showImportStatus("Imaging: " + covered + " vessel" + (covered === 1 ? "" : "s") + " matched to microscopy · " +
-      matchedSessions + " of " + totalSessions + " sessions linked · " + gapSessions + " imaged with no vessel record.", false);
+    showImportStatus("Imaging: " + covered + " vessels matched · " + matched + "/" + total + " sessions linked · " +
+      imagingPending.length + " uncertain to review · " + gap + " no-match.", false);
   }
 
   function runCsvImport(text) {
@@ -1464,6 +1598,19 @@
     html += "</div>";
     body.innerHTML = html;
     Array.prototype.forEach.call(body.querySelectorAll("[data-node-id]"), wireRowClick);
+    // Click a 🔬 icon to open/view its image (never renames the file).
+    Array.prototype.forEach.call(body.querySelectorAll(".wlpc-tl-imgpt.is-openable"), function (el) {
+      el.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var p = el.getAttribute("data-img-path");
+        if (!p) return;
+        if (typeof window.wlpOpenImage !== "function") { showImportStatus("Opening images needs the desktop app.", true); return; }
+        Promise.resolve(window.wlpOpenImage(p)).then(function (res) {
+          if (res && res.ok) showImportStatus(res.mode === "reveal" ? "Revealed the image in Finder." : "Opening image…", false);
+          else showImportStatus("Couldn’t open the image" + (res && res.error ? " (" + res.error + ")" : "") + ".", true);
+        });
+      });
+    });
   }
 
   function shortDate(s) { var m = String(s || "").match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? (m[2] + "/" + m[3] + "/" + m[1].slice(2)) : ""; }
@@ -1487,10 +1634,28 @@
       clOf[v.nodeId] = c;
     });
 
+    // Imaging sessions per passage band — one 🔬 per (passage, date), placed at its
+    // imaging date along the growth span. Their dates extend the axis domain so a
+    // session imaged after the last seed date still lands on the timeline.
+    var imgByBand = {}, imgMs = [];
+    vessels.forEach(function (v) {
+      var pk = (pnum(v) === null ? "?" : pnum(v));
+      (v.imagingSessions || []).forEach(function (s) {
+        if (!s || !s.date) return;
+        var ms = msOf(s.date); if (isNaN(ms)) return;
+        imgMs.push(ms);
+        var band = imgByBand[pk] = imgByBand[pk] || {};
+        var e = band[s.date] = band[s.date] || { ms: ms, imgs: 0, n: 0, conds: {}, path: "" };
+        e.imgs += (s.images || 0); e.n++; if (s.cond) e.conds[s.cond] = true; if (!e.path && s.path) e.path = s.path;
+      });
+    });
+
     var datedC = clusters.filter(function (c) { return !isNaN(c.ms); });
-    var minMs = datedC.length ? Math.min.apply(null, datedC.map(function (c) { return c.ms; })) : 0;
-    var maxMs = datedC.length ? Math.max.apply(null, datedC.map(function (c) { return c.ms; })) : 0;
-    function baseX(c) { if (isNaN(c.ms)) return LEFT; if (maxMs === minMs) return (LEFT + RIGHT) / 2; return LEFT + (c.ms - minMs) / (maxMs - minMs) * (RIGHT - LEFT); }
+    var domainMs = datedC.map(function (c) { return c.ms; }).concat(imgMs);
+    var minMs = domainMs.length ? Math.min.apply(null, domainMs) : 0;
+    var maxMs = domainMs.length ? Math.max.apply(null, domainMs) : 0;
+    function xOf(ms) { if (isNaN(ms)) return LEFT; if (maxMs === minMs) return (LEFT + RIGHT) / 2; return LEFT + (ms - minMs) / (maxMs - minMs) * (RIGHT - LEFT); }
+    function baseX(c) { return xOf(c.ms); }
 
     // Passage bands (numeric ascending, then unknown "P?").
     var bandKeys = [], sBand = {};
@@ -1546,9 +1711,6 @@
       var t = [(n > 1 ? n + "× " : "") + pass + (v.seedDate ? " · " + shortDate(v.seedDate) : ""), LOGIC().vesselTypeFromIcon(v.iconId), v.status || "active"];
       if (n > 1) t.push(n + " flasks at this passage on one date — a split, or duplicate entries");
       if (uncertain) t.push("best guess (source marked uncertain)");
-      var imaging = "";
-      c.members.forEach(function (m) { if (m.imaging && !imaging) imaging = m.imaging; });
-      if (imaging) t.push("🔬 imaged: " + imaging);
       nodes +=
         '<g class="wlpc-tl-node' + (anyFlag ? " is-flagged" : "") + (n > 1 ? " is-cluster" : "") + '" data-node-id="' + esc(v.nodeId) + '"' +
           (n > 1 ? ' data-cluster-members="' + esc(c.members.map(function (m) { return m.nodeId; }).join(",")) + '"' : "") +
@@ -1559,12 +1721,33 @@
           '<text class="wlpc-tl-date" y="' + (NR + 12) + '" text-anchor="middle">' + (v.seedDate ? esc(shortDate(v.seedDate)) : "—") + "</text>" +
           (n > 1 ? '<circle class="wlpc-tl-count-bg" cx="' + (NR - 1) + '" cy="-' + (NR - 3) + '" r="8"/><text class="wlpc-tl-count" x="' + (NR - 1) + '" y="-' + (NR - 6) + '" text-anchor="middle">' + n + "</text>" : "") +
           (uncertain ? '<text class="wlpc-tl-guess" x="-' + (NR - 1) + '" y="-' + (NR - 5) + '" text-anchor="end">?</text>' : "") +
-          (imaging ? '<text class="wlpc-tl-img" x="' + (NR - 2) + '" y="' + (NR + 1) + '" text-anchor="middle">🔬</text>' : "") +
           (anyFlag ? '<circle class="wlpc-tl-flag" cx="-' + (NR - 2) + '" cy="' + (NR - 3) + '" r="4"/>' : "") +
         "</g>";
     });
 
-    return '<svg class="wlpc-tl-svg" viewBox="0 0 1000 ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + edges + nodes + "</svg>";
+    // Date-placed 🔬 icons: one per (passage, imaging date), positioned at the
+    // imaging date along the passage band. Clickable to open the image.
+    var imgIcons = "";
+    Object.keys(imgByBand).forEach(function (pk) {
+      if (bandTop[pk] == null) return;
+      var yc = bandTop[pk] + bandRows[pk] * SUBH / 2;
+      var band = imgByBand[pk];
+      Object.keys(band).forEach(function (dateStr) {
+        var e = band[dateStr];
+        var conds = Object.keys(e.conds).join(", ");
+        var title = "🔬 " + shortDate(dateStr) + " · " + e.imgs + " field" + (e.imgs === 1 ? "" : "s") +
+          (conds ? " · " + conds : "") + (e.path ? " · click to view" : " · (no path)");
+        imgIcons +=
+          '<g class="wlpc-tl-imgpt' + (e.path ? " is-openable" : "") + '"' + (e.path ? ' data-img-path="' + esc(e.path) + '"' : "") +
+            ' transform="translate(' + xOf(e.ms).toFixed(1) + "," + yc + ')">' +
+            "<title>" + esc(title) + "</title>" +
+            '<circle class="wlpc-tl-imgpt-bg" r="8"/>' +
+            '<text class="wlpc-tl-imgpt-ico" y="3.4" text-anchor="middle">🔬</text>' +
+          "</g>";
+      });
+    });
+
+    return '<svg class="wlpc-tl-svg" viewBox="0 0 1000 ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + edges + nodes + imgIcons + "</svg>";
   }
 
   // Show the records view (and hide the canvas + palette) while the recorder

@@ -5311,7 +5311,10 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-tl-pass { fill: var(--text); font-size: 12px; font-weight: 700; font-family: var(--font-display, sans-serif); }
 .wlpc-tl-date { fill: var(--muted); font-size: 10.5px; font-family: var(--font-display, sans-serif); }
 .wlpc-tl-guess { fill: #ff9f0a; font-size: 13px; font-weight: 800; font-family: var(--font-display, sans-serif); }
-.wlpc-tl-img { font-size: 9px; }
+.wlpc-tl-imgpt.is-openable { cursor: pointer; }
+.wlpc-tl-imgpt-bg { fill: rgba(94,124,168,.22); stroke: rgba(120,170,255,.55); stroke-width: 1; transition: fill 120ms ease; }
+.wlpc-tl-imgpt.is-openable:hover .wlpc-tl-imgpt-bg { fill: rgba(120,170,255,.55); }
+.wlpc-tl-imgpt-ico { font-size: 9px; pointer-events: none; }
 .wlpc-tl-flag { fill: #ffd60a; stroke: var(--panel, #2c2c2e); stroke-width: 1; }
 .wlpc-tl-band { fill: var(--muted); font-size: 12px; font-weight: 700; font-family: var(--font-display, sans-serif); }
 .wlpc-tl-grid { stroke: rgba(142, 142, 147, .13); stroke-width: 1; }

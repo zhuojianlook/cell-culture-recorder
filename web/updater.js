@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.50", date: "2026-07-02", changes: [
+      "Microscopy matching is now fuzzy + reviewable. Image filenames that don’t confidently match a vessel — donor-number typos (e.g. ‘08326’→‘38326’, edit-distance 1), ambiguous near-collisions, or genuine gaps — are surfaced in a new “🔬 Microscopy” review section instead of being silently mis-linked. Confirm the suggested vessel or pick the right one; this is a name correction that NEVER renames or touches the real image file.",
+      "Each imaging session now shows as a 🔬 icon placed at its imaging DATE along the passage’s growth span on the Timeline (the date axis extends to cover imaging dates). Click a 🔬 to open/view that image in your default app, or reveal it in Finder — the file is never copied or renamed.",
+    ] },
     { version: "0.2.49", date: "2026-07-02", changes: [
       "New source of truth — brightfield microscopy. Import the imaging-session CSV (built from the .nd2 / .tif filenames only — the large image files are never downloaded) and each matched vessel gains an imaging summary (sessions · fields · observation date span), shown as a 🔬 marker + tooltip on the Timeline. The import reports coverage and how many donors were imaged with no matching vessel record — a real gap the images reveal. Because the filenames are hand-typed and lossy, matching is by donor core + passage.",
     ] },
