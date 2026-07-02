@@ -76,7 +76,27 @@ test("donorIdentity derives core/eye/aliases across the source id formats", () =
   assert.equal(cn.eye, "OD");
 
   const v = L.donorIdentity("2025-3468");         // year-stripped alias bridges to (3468)
-  assert.ok(v.aliases.includes("3468"));
+  assert.ok(v.aliases.includes("3468"), "year-stripped alias present so cross-refs bridge");
+  assert.notEqual(v.core, "3468", "core is the YEAR-QUALIFIED number (no cross-year collision)");
+  assert.ok(v.aliases.includes("20253468"));
+});
+
+test("donorMatchQuality classifies eye / year / exact / weak", () => {
+  // opposite cornea — a right-cornea donor must never fuse onto a left-cornea vessel
+  assert.equal(L.donorMatchQuality("3773 OD", { donor: "3773", eye: "OS" }).quality, "eye");
+  assert.equal(L.donorMatchQuality({ donor: "5046", eye: "OD" }, { donor: "5046", eye: "OS" }).quality, "eye");
+  // same number, different calendar year
+  assert.equal(L.donorMatchQuality("2025-0218", "2026-0218").quality, "year");
+  assert.equal(L.donorMatchQuality("2024-5046", "2025-5046").quality, "year");
+  // a DIFFERENT-YEAR pair that is ALSO opposite-eye is labeled "year" (different
+  // donor entirely), not "opposite cornea".
+  assert.equal(L.donorMatchQuality({ donor: "2024-5046", eye: "OD" }, { donor: "2025-5046", eye: "OS" }).quality, "year");
+  // clean exact + leading-zero variant are exact
+  assert.equal(L.donorMatchQuality("6769", "6769").quality, "exact");
+  assert.equal(L.donorMatchQuality("LWVI-25-045986ODCN", { donor: "045986", eye: "OD" }).quality, "exact");
+  // pooled/blank eye is a wildcard, compatible with either concrete side
+  assert.equal(L.donorMatchQuality({ donor: "5046", eye: "OU" }, { donor: "5046", eye: "OD" }).quality, "exact");
+  assert.equal(L.donorMatchQuality("5046", { donor: "5046", eye: "OS" }).quality, "exact");
 });
 
 test("reconcileDonors buckets matched / fuzzy / unmatched across sources", () => {
@@ -94,10 +114,41 @@ test("reconcileDonors buckets matched / fuzzy / unmatched across sources", () =>
     { donor: "2099-9999" },                // -> no vessel
   ];
   const r = L.reconcileDonors(donors, vessels);
-  assert.equal(r.matched.length, 2, "3468 + 045986 match one vessel each");
-  assert.equal(r.fuzzy.length, 1, "4392 spans two vessel labels -> confirm");
+  // EVERY donor with a vessel candidate now needs an explicit confirmation, so
+  // all three land in `fuzzy` (single hits carry single:true). `matched` is kept
+  // (single-hit only) for back-compat.
+  assert.equal(r.fuzzy.length, 3, "3468 + 045986 + 4392 all surface for confirmation");
+  assert.equal(r.matched.length, 2, "3468 + 045986 are single-hit (back-compat list)");
+  const by = {};
+  r.fuzzy.forEach((f) => { by[String(f.donor.donor)] = f; });
+  assert.equal(by["?20250524 (3468) OD"].single, true, "cross-ref 3468 is a single hit");
+  assert.equal(by["LWVI-25-045986ODCN"].single, true, "045986 is a single hit");
+  assert.equal(by["2025-4392RC"].single, false, "4392 spans two vessels");
+  assert.equal(by["2025-4392RC"].cands.length, 2);
   assert.equal(r.donorsWithoutVessel.length, 1, "2099-9999 has no vessel");
   assert.ok(r.vesselsWithoutDonor.includes("6765"), "legacy vessel has no donor record");
+});
+
+test("reconcileDonors: a pooled donor is compatible with either cornea (no false eye flag)", () => {
+  // Real data: vessels carry a bare donor string + a separate eye field; two
+  // same-string vessels collapse to one candidate whose eye is compatible.
+  const r1 = L.reconcileDonors([{ donor: "5046ODOS", eye: "OU" }], [{ donor: "5046", eye: "OD" }, { donor: "5046", eye: "OS" }]);
+  assert.equal(r1.fuzzy.length, 1);
+  assert.equal(r1.fuzzy[0].cands[0].quality, "exact", "pooled eye is never flagged as a mismatch");
+
+  // When the eye IS in the vessel donor string, both corneas surface for the user.
+  const r2 = L.reconcileDonors([{ donor: "5046ODOS", eye: "OU" }], [{ donor: "5046 OD" }, { donor: "5046 OS" }]);
+  assert.equal(r2.fuzzy[0].cands.length, 2, "both corneas offered — user picks");
+  assert.ok(r2.fuzzy[0].cands.every((c) => c.quality === "exact"), "pooled eye compatible with each side");
+
+  // A concrete opposite-cornea donor string IS flagged.
+  const r3 = L.reconcileDonors([{ donor: "3773 OD" }], [{ donor: "3773 OS" }]);
+  assert.equal(r3.fuzzy[0].cands[0].quality, "eye", "OD donor vs OS-only vessel is flagged");
+
+  // But a donor id that has BOTH an OD and an OS vessel (same donor string) must
+  // NOT be falsely flagged — the compatible side is chosen. (Real case: 2024-2425.)
+  const r4 = L.reconcileDonors([{ donor: "2024-2425RC", eye: "OD" }], [{ donor: "2024-2425", eye: "OD" }, { donor: "2024-2425", eye: "OS" }]);
+  assert.equal(r4.fuzzy[0].cands[0].quality, "exact", "OD donor finds its OD vessel, not flagged");
 });
 
 test("cultureLabelSummary builds the canvas identity", () => {

@@ -809,9 +809,52 @@
     if (noYear && noYear !== num) aliases[noYear] = true;
     var full = lo.replace(/[^a-z0-9]/g, "");
     if (full) aliases[full] = true;
-    var core = paren || noYear || num;
+    // Core prefers the YEAR-QUALIFIED number so 2024-5046 and 2025-5046 have
+    // distinct cores (no silent cross-year collision). The year-stripped `noYear`
+    // stays in aliases, so a bare cross-ref like "(3468)" still bridges — but such
+    // a match is now classified lower-confidence by donorMatchQuality, not auto-applied.
+    var core = paren || num;
     if (core) aliases[core] = true;
     return { core: core, eye: eye, uncertain: uncertain, aliases: Object.keys(aliases) };
+  }
+
+  // Classify a donor<->vessel candidate so the UI can flag it and NEVER auto-apply
+  // a wrong cornea or a cross-year collision. donor/vessel may each be a raw id
+  // string or a record {donor, eye}. Returns { quality, reason } with quality in
+  // "exact" (same year-qualified number, compatible eye), "eye" (opposite cornea —
+  // OD vs OS), "year" (same number, different calendar year), "weak" (matched only
+  // via a looser alias, e.g. a cross-reference). Pooled/blank/OU eyes are wildcards.
+  function donorMatchQuality(donor, vessel) {
+    var dRaw = (donor && donor.donor != null) ? donor.donor : donor;
+    var vRaw = (vessel && vessel.donor != null) ? vessel.donor : vessel;
+    var dId = donorIdentity(dRaw), vId = donorIdentity(vRaw);
+    var dEye = (donor && donor.eye) ? coerceEye(donor.eye) : dId.eye;
+    var vEye = (vessel && vessel.eye) ? coerceEye(vessel.eye) : vId.eye;
+    var concrete = function (e) { return e === "OD" || e === "OS"; };
+    // Check YEAR before eye: a different calendar year means a different donor
+    // entirely, so "different year" is the right label even if the eyes also differ.
+    var stripYear = function (s) { return str(s).replace(/^20\d{2}/, ""); };
+    var dy = str(dRaw).match(/(20\d{2})/), vy = str(vRaw).match(/(20\d{2})/);
+    if (dy && vy && dy[1] !== vy[1] && dId.core !== vId.core &&
+        stripYear(dId.core) && stripYear(dId.core) === stripYear(vId.core))
+      return { quality: "year", reason: "same number, different year (" + dy[1] + " vs " + vy[1] + ")" };
+    if (concrete(dEye) && concrete(vEye) && dEye !== vEye)
+      return { quality: "eye", reason: "opposite cornea (" + dEye + " vs " + vEye + ")" };
+    if (dId.core && dId.core === vId.core) return { quality: "exact", reason: "id match" };
+    return { quality: "weak", reason: "loose id match (alias only)" };
+  }
+
+  // A vessel donor id can correspond to several physical vessels of DIFFERENT eyes
+  // (e.g. both an OD and an OS flask). Given the donor's eye, pick the most
+  // compatible vessel eye so a donor that DOES have a same-side vessel is never
+  // falsely flagged "opposite cornea"; only flag when every vessel is the other side.
+  function pickVesselEye(donorEye, eyes) {
+    if (!eyes || !eyes.length) return "";
+    var blank = function (e) { return !e || e === "unknown" || e === "OU"; };
+    if (blank(donorEye)) return eyes[0];
+    if (eyes.indexOf(donorEye) >= 0) return donorEye;
+    for (var i = 0; i < eyes.length; i++) if (blank(eyes[i])) return eyes[i];
+    return eyes[0];
   }
 
   // Reconcile donor-metadata records against vessel records. Each record is
@@ -821,16 +864,24 @@
   // gap (a cultured vessel with no donor record) is vesselsWithoutDonor.
   function reconcileDonors(donorRecords, vesselRecords) {
     donorRecords = donorRecords || []; vesselRecords = vesselRecords || [];
-    var byCore = {}, byFull = {}, vesselDonorSet = {};
+    var byCore = {}, byFull = {}, vesselDonorSet = {}, vesselEyes = {};
     vesselRecords.forEach(function (v) {
       var raw = str(v.donor).trim();
       if (!raw) return;
       vesselDonorSet[raw] = true;
+      var ve = coerceEye(v.eye);
+      if (ve && ve !== "unknown") { (vesselEyes[raw] = vesselEyes[raw] || []); if (vesselEyes[raw].indexOf(ve) < 0) vesselEyes[raw].push(ve); }
       var id = donorIdentity(raw);
       var full = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
       if (full) byFull[full] = raw;
       id.aliases.forEach(function (a) { (byCore[a] = byCore[a] || {})[raw] = true; });
     });
+    // EVERY donor with >=1 vessel candidate goes into `fuzzy` (single hits carry
+    // single:true) so the UI surfaces it for an explicit human confirmation —
+    // single-hit matches are no longer silently applied/dropped. Each candidate is
+    // classified so opposite-cornea / cross-year matches are flagged, never auto.
+    // `matched` is retained (single-hit only) purely for back-compat.
+    var rank = { exact: 0, weak: 1, year: 2, eye: 3 };
     var matched = [], fuzzy = [], donorsWithoutVessel = [], claimed = {};
     donorRecords.forEach(function (d) {
       var raw = str(d.donor).trim();
@@ -842,9 +893,16 @@
         if (byCore[a]) Object.keys(byCore[a]).forEach(function (vd) { hits[vd] = true; });
       });
       var hitList = Object.keys(hits);
-      if (hitList.length === 0) { donorsWithoutVessel.push(d); }
-      else if (hitList.length === 1) { matched.push({ donor: d, vesselDonors: hitList }); claimed[hitList[0]] = true; }
-      else { fuzzy.push({ donor: d, candidates: hitList }); hitList.forEach(function (vd) { claimed[vd] = true; }); }
+      if (hitList.length === 0) { donorsWithoutVessel.push(d); return; }
+      var dEye = coerceEye(d.eye);
+      var cands = hitList.map(function (vd) {
+        var q = donorMatchQuality(d, { donor: vd, eye: pickVesselEye(dEye, vesselEyes[vd]) });
+        return { vessel: vd, quality: q.quality, reason: q.reason };
+      });
+      cands.sort(function (a, b) { return (rank[a.quality] == null ? 9 : rank[a.quality]) - (rank[b.quality] == null ? 9 : rank[b.quality]); });
+      fuzzy.push({ donor: d, candidates: hitList, cands: cands, single: hitList.length === 1 });
+      hitList.forEach(function (vd) { claimed[vd] = true; });
+      if (hitList.length === 1) matched.push({ donor: d, vesselDonors: hitList });
     });
     var vesselsWithoutDonor = Object.keys(vesselDonorSet).filter(function (vd) { return !claimed[vd]; });
     return { matched: matched, fuzzy: fuzzy, donorsWithoutVessel: donorsWithoutVessel, vesselsWithoutDonor: vesselsWithoutDonor };
@@ -853,6 +911,7 @@
   return {
     EVENT_TYPES: EVENT_TYPES,
     donorIdentity: donorIdentity,
+    donorMatchQuality: donorMatchQuality,
     reconcileDonors: reconcileDonors,
     parseEvents: parseEvents,
     statusFromEvent: statusFromEvent,

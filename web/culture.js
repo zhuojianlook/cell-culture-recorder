@@ -558,6 +558,17 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
     });
   }
+  // "field=Header; field=Header" (the pipeline's LogFieldSources) -> {field: header}.
+  function parseFieldSources(s) {
+    var out = {};
+    String(s == null ? "" : s).split(";").forEach(function (p) {
+      var i = p.indexOf("=");
+      if (i < 0) return;
+      var k = p.slice(0, i).trim(), v = p.slice(i + 1).trim();
+      if (k && v) out[k] = v;
+    });
+    return out;
+  }
 
   var view = null;
   var viewMode = "table"; // "table" | "tree"
@@ -719,9 +730,49 @@
   // Dates are stored Singapore-local; the tooltip shows the original US date-time.
   function gtSourceChip(d) {
     if (!d || !d.gtSource) return "";
-    var t = "Ground truth from " + d.gtSource;
+    var t = "Ground truth available from " + d.gtSource + " (not applied until you confirm a vessel)";
     if (d.deathUS) t += " · dates converted to Singapore time (death recorded " + d.deathUS + " " + (d.sourceTz || "US") + ")";
-    return ' <span class="wlpc-rc-src" title="' + esc(t) + '">✓ eye-bank</span>';
+    return ' <span class="wlpc-rc-src" title="' + esc(t) + '">eye-bank source</span>';
+  }
+  // Where a value came from. Spreadsheet: "file :: tab :: column" (from Source +
+  // the pipeline's per-field LogFieldSources). PDF: the eye-bank filename.
+  function logProvenance(d, field) {
+    var c = d && d.fieldSources && d.fieldSources[field];
+    if (!c) return "";
+    var src = String((d && d.source) || "").replace(/\s*\+\s*PDF\s*$/i, "").trim();
+    return (src ? src + " :: " : "") + c;
+  }
+  function pdfProvenance(d) { return (d && d.gtSource) || ""; }
+  // An expandable per-field provenance table: field · effective value · where it
+  // came from (eye-bank PDF, or the exact spreadsheet file :: tab :: column). This
+  // is the literal answer to "show the field name where the log came from".
+  function donorProvenanceDetails(d) {
+    var rows = [];
+    var srcFor = function (f, isConflict) {
+      var usingLog = isConflict && d.chosen && d.chosen[f] === "log";
+      if (isConflict && d.gtSource && !usingLog) return "eye-bank PDF · " + d.gtSource;
+      var lp = logProvenance(d, f);
+      if (lp) return lp;
+      if (d.gtSource) return "eye-bank PDF · " + d.gtSource;
+      return "—";
+    };
+    [["deceased", "Deceased date", true], ["endothelial", "Endothelial density", true],
+     ["age", "Donor age", true], ["sex", "Donor sex", true]].forEach(function (fr) {
+      var v = gtValue(d, fr[0]); if (!v) return;
+      rows.push([fr[1], (fr[0] === "deceased" ? (shortDate(v) || v) : v), srcFor(fr[0], true)]);
+    });
+    [["dissociation", "Dissociation date"], ["seeding", "Seeding success"], ["ethnicity", "Ethnicity"]].forEach(function (fr) {
+      var v = d[fr[0]]; if (!v) return;
+      rows.push([fr[1], (fr[0] === "dissociation" ? (shortDate(v) || v) : v), srcFor(fr[0], false)]);
+    });
+    if (d.cod) rows.push(["Cause of death", d.cod, d.gtSource ? ("eye-bank PDF · " + d.gtSource) : "—"]);
+    if (d.serology) rows.push(["Serology", d.serology, d.gtSource ? ("eye-bank PDF · " + d.gtSource) : "—"]);
+    if (!rows.length) return "";
+    return '<details class="wlpc-rc-prov-det"><summary>where these came from</summary>' +
+      '<table class="wlpc-rc-pvtab"><tr><th>Field</th><th>Value</th><th>Source</th></tr>' +
+      rows.map(function (r) {
+        return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td><td class="wlpc-rc-pvsrc">' + esc(r[2]) + '</td></tr>';
+      }).join("") + '</table></details>';
   }
   function renderReconcilePanel() {
     if (!view) return;
@@ -777,16 +828,18 @@
       html += '<div class="wlpc-rc-sec"><div class="wlpc-rc-sec-hd">Ground-truth conflicts — PDF vs spreadsheet, choose which is correct (' + conflicts.length + ')</div>';
       conflicts.slice(0, 20).forEach(function (d) {
         var idx = donorsAll.indexOf(d);
+        var pdfSrc = pdfProvenance(d);
         html += '<div class="wlpc-rc-row">' +
           '<div class="wlpc-rc-main"><span class="wlpc-rc-id">' + esc(d.donor) + '</span>' +
             (d.eye ? ' <span class="wlpc-rc-eye">' + esc(String(d.eye).toUpperCase()) + '</span>' : '') +
-            gtSourceChip(d) + '</div>' +
+            gtSourceChip(d) + donorProvenanceDetails(d) + '</div>' +
           '<div class="wlpc-rc-cflist">' +
             donorConflicts(d).map(function (c) {
               var pick = (d.chosen && d.chosen[c.field]) || "pdf";
+              var logSrc = logProvenance(d, c.field);
               return '<div class="wlpc-rc-cf"><span class="wlpc-rc-cf-lbl">' + esc(c.label) + '</span>' +
-                '<button type="button" class="wlpc-rc-cf-opt' + (pick === "pdf" ? " is-on" : "") + '" data-rc-choose="' + idx + '" data-rc-field="' + esc(c.field) + '" data-rc-which="pdf">📄 ' + esc(String(c.pdf)) + '</button>' +
-                '<button type="button" class="wlpc-rc-cf-opt' + (pick === "log" ? " is-on" : "") + '" data-rc-choose="' + idx + '" data-rc-field="' + esc(c.field) + '" data-rc-which="log">log: ' + esc(String(c.log)) + '</button>' +
+                '<button type="button" class="wlpc-rc-cf-opt' + (pick === "pdf" ? " is-on" : "") + '" data-rc-choose="' + idx + '" data-rc-field="' + esc(c.field) + '" data-rc-which="pdf" title="Eye-bank PDF' + (pdfSrc ? ": " + esc(pdfSrc) : "") + '">📄 ' + esc(String(c.pdf)) + (pdfSrc ? ' <span class="wlpc-rc-prov">' + esc(pdfSrc) + '</span>' : '') + '</button>' +
+                '<button type="button" class="wlpc-rc-cf-opt' + (pick === "log" ? " is-on" : "") + '" data-rc-choose="' + idx + '" data-rc-field="' + esc(c.field) + '" data-rc-which="log" title="Spreadsheet' + (logSrc ? ": " + esc(logSrc) : "") + '">log: ' + esc(String(c.log)) + (logSrc ? ' <span class="wlpc-rc-prov">' + esc(logSrc) + '</span>' : '') + '</button>' +
                 '</div>';
             }).join("") +
           '</div></div>';
@@ -795,24 +848,41 @@
       html += '</div>';
     }
 
-    // Section 1 — ambiguous donor↔vessel matches (confirm which vessel it is).
+    // Section 1 — confirm & apply donor ground truth. EVERY donor with a vessel
+    // candidate (single-hit included) lands here and requires an explicit click;
+    // nothing is fused until confirmed. Opposite-cornea / cross-year candidates are
+    // flagged red and never pre-selected.
+    var QB = {
+      exact: { cls: "", badge: "✓ id match" },
+      weak: { cls: " is-warnmatch", badge: "⚠ loose match" },
+      year: { cls: " is-warnmatch", badge: "⚠ year mismatch" },
+      eye: { cls: " is-warnmatch", badge: "⚠ opposite cornea" }
+    };
     if (fuzzy.length) {
-      html += '<div class="wlpc-rc-sec"><div class="wlpc-rc-sec-hd">Confirm donor ↔ vessel matches (' + fuzzy.length + ')</div>';
-      fuzzy.slice(0, 20).forEach(function (f) {
+      html += '<div class="wlpc-rc-sec"><div class="wlpc-rc-sec-hd">Confirm &amp; apply donor ground truth — nothing is applied until you confirm (' + fuzzy.length + ')</div>';
+      fuzzy.slice(0, 30).forEach(function (f) {
         var idx = donorsAll.indexOf(f.donor);
         var gt = donorGtBits(f.donor);
-        html += '<div class="wlpc-rc-row">' +
+        var flagged = (f.cands || []).some(function (c) { return c.quality === "eye" || c.quality === "year"; });
+        var hint = f.single ? "one candidate — confirm to apply its ground truth" : "matches " + f.candidates.length + " vessel ids — pick the right one";
+        html += '<div class="wlpc-rc-row is-unconfirmed">' +
           '<div class="wlpc-rc-main"><span class="wlpc-rc-id">' + esc(f.donor.donor) + '</span>' +
             (f.donor.eye ? ' <span class="wlpc-rc-eye">' + esc(String(f.donor.eye).toUpperCase()) + '</span>' : '') +
+            ' <span class="wlpc-rc-unconf">● not applied</span>' +
             gtSourceChip(f.donor) +
             (gt ? ' <span class="wlpc-rc-gt">' + esc(gt) + '</span>' : '') +
-            '<span class="wlpc-rc-hint">matches ' + f.candidates.length + ' vessel ids — which is it?</span></div>' +
+            '<span class="wlpc-rc-hint' + (flagged ? " is-warn" : "") + '">' + esc(hint) + '</span>' +
+            donorProvenanceDetails(f.donor) + '</div>' +
           '<div class="wlpc-rc-acts">' +
-            f.candidates.map(function (c) { return '<button type="button" class="wlpc-rc-btn is-go" data-rc-link="' + idx + '" data-rc-vessel="' + esc(c) + '">' + esc(c) + '</button>'; }).join("") +
+            (f.cands || []).map(function (c) {
+              var q = QB[c.quality] || QB.weak;
+              return '<button type="button" class="wlpc-rc-btn' + q.cls + '" data-rc-link="' + idx + '" data-rc-vessel="' + esc(c.vessel) + '" title="' + esc(c.reason || "") + '">' + esc(c.vessel) +
+                ' <span class="wlpc-rc-mq">' + esc(q.badge) + '</span></button>';
+            }).join("") +
             '<button type="button" class="wlpc-rc-btn" data-rc-dismiss="' + idx + '">not a match</button>' +
           '</div></div>';
       });
-      if (fuzzy.length > 20) html += '<div class="wlpc-rc-more">…and ' + (fuzzy.length - 20) + ' more</div>';
+      if (fuzzy.length > 30) html += '<div class="wlpc-rc-more">…and ' + (fuzzy.length - 30) + ' more</div>';
       html += '</div>';
     }
 
@@ -865,6 +935,25 @@
       html += '</div>';
     }
 
+    // Confirmed & applied — donors whose ground truth HAS been fused onto a vessel.
+    // Shown (collapsed) so the applied state is visible and reversible.
+    var confirmedList = donorsAll.filter(function (d) { return d.confirmedVessel && !d._dismissed; });
+    if (confirmedList.length) {
+      html += '<details class="wlpc-rc-info wlpc-rc-confirmed"><summary>✓ Confirmed &amp; applied (' + confirmedList.length + ')</summary>';
+      confirmedList.slice(0, 40).forEach(function (d) {
+        var idx = donorsAll.indexOf(d);
+        html += '<div class="wlpc-rc-row is-confirmed">' +
+          '<div class="wlpc-rc-main"><span class="wlpc-rc-id">' + esc(d.donor) + '</span>' +
+            (d.eye ? ' <span class="wlpc-rc-eye">' + esc(String(d.eye).toUpperCase()) + '</span>' : '') +
+            ' <span class="wlpc-rc-appliedto">→ ' + esc(d.confirmedVessel) + '</span>' +
+            donorProvenanceDetails(d) + '</div>' +
+          '<div class="wlpc-rc-acts"><button type="button" class="wlpc-rc-btn" data-rc-unconfirm="' + idx + '">undo</button></div>' +
+          '</div>';
+      });
+      if (confirmedList.length > 40) html += '<div class="wlpc-rc-more">…and ' + (confirmedList.length - 40) + ' more</div>';
+      html += '</details>';
+    }
+
     // Section 3/4 — informational, collapsed lists.
     html += infoSection("Donor records with no vessel", rec.donorsWithoutVessel.map(function (d) {
       return esc(d.donor) + (d.eye ? " " + esc(String(d.eye).toUpperCase()) : "") + (donorGtBits(d) ? ' · ' + esc(donorGtBits(d)) : "");
@@ -893,18 +982,19 @@
   function wireReconcile(box) {
     box.onclick = function (e) {
       var t = e.target;
-      // the choose buttons contain an emoji/text span — walk up to the button
-      if (t.getAttribute && t.getAttribute("data-rc-choose") == null && t.closest) {
-        var btn = t.closest("[data-rc-choose]");
-        if (btn) t = btn;
-      }
+      // toggle is a header div; check it before collapsing clicks onto a button
       if (t.closest && t.closest("[data-rc-toggle]")) { reconcileCollapsed = !reconcileCollapsed; renderReconcilePanel(); return; }
+      // action controls carry inner spans (emoji / quality badge / provenance) —
+      // resolve any click inside a button back to the button that owns the data-*.
+      if (t.closest) { var btn = t.closest("button"); if (btn) t = btn; }
       var ch = t.getAttribute && t.getAttribute("data-rc-choose");
       if (ch != null) { chooseGt(parseInt(ch, 10), t.getAttribute("data-rc-field"), t.getAttribute("data-rc-which")); return; }
       var link = t.getAttribute && t.getAttribute("data-rc-link");
       if (link != null) { confirmDonorMatch(parseInt(link, 10), t.getAttribute("data-rc-vessel")); return; }
       var dis = t.getAttribute && t.getAttribute("data-rc-dismiss");
       if (dis != null) { dismissDonor(parseInt(dis, 10)); return; }
+      var unc = t.getAttribute && t.getAttribute("data-rc-unconfirm");
+      if (unc != null) { unconfirmDonor(parseInt(unc, 10)); return; }
       var clr = t.getAttribute && t.getAttribute("data-rc-clearorphan");
       if (clr != null) { clearOrphanLabel(clr); return; }
       var ia = t.getAttribute && t.getAttribute("data-img-assign");
@@ -938,6 +1028,32 @@
     if (typeof window.wlpSaveCultureDonors === "function") window.wlpSaveCultureDonors(donorsAll);
     renderView();
   }
+  // Undo a confirmation: remove the fused ground truth from the vessel(s) and put
+  // the donor back in the confirm list. Only strips what fusion added.
+  function unfuseDonorFromVessels(d, vesselDonor) {
+    var nodes = allCultureVessels().filter(function (n) { return read(n, "Donor", "") === vesselDonor; });
+    var changed = 0;
+    nodes.forEach(function (n) {
+      var note = read(n, "Notes", "");
+      var stripped = note.replace(/\s*\[donor GT:[^\]]*\]/g, "").trim();
+      if (stripped !== note) { write(n, "Notes", stripped); changed++; }
+      // clear the dissociation date ONLY if fusion set it (marked) — never a value
+      // the user typed themselves.
+      if (n.dataset.cultureGtSetDissoc === "1") { write(n, "DissociationDate", ""); delete n.dataset.cultureGtSetDissoc; changed++; }
+    });
+    if (changed && typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
+  }
+  function unconfirmDonor(idx) {
+    var donorsAll = (typeof window.wlpLoadCultureDonors === "function") ? (window.wlpLoadCultureDonors() || []) : [];
+    var d = donorsAll[idx];
+    if (!d) return;
+    var vd = d.confirmedVessel;
+    delete d.confirmedVessel;
+    if (typeof window.wlpSaveCultureDonors === "function") window.wlpSaveCultureDonors(donorsAll);
+    if (vd) unfuseDonorFromVessels(d, vd);
+    renderView();
+    showImportStatus("Un-applied donor " + d.donor + " — ground truth removed from " + (vd || "the vessel") + ".", false);
+  }
   // Choose the ground-truth source for one field of a donor (pdf | log). Re-fuses
   // onto the vessels if the donor is already confirmed. Persisted with the donor.
   function chooseGt(idx, field, which) {
@@ -958,7 +1074,11 @@
     var nodes = allCultureVessels().filter(function (n) { return read(n, "Donor", "") === vesselDonor; });
     var changed = 0;
     nodes.forEach(function (n) {
-      if (d.dissociation && !read(n, "DissociationDate", "")) { write(n, "DissociationDate", d.dissociation); changed++; }
+      // Only fill an EMPTY dissociation date, and mark that fusion set it so undo
+      // can clear ONLY fusion-set dates (never a value the user typed themselves).
+      if (d.dissociation && !read(n, "DissociationDate", "")) {
+        write(n, "DissociationDate", d.dissociation); n.dataset.cultureGtSetDissoc = "1"; changed++;
+      }
       var gt = [];
       var dec = gtValue(d, "deceased");
       if (dec) gt.push("deceased " + dec);
@@ -967,9 +1087,17 @@
       if (d.seeding) gt.push("seeding " + d.seeding);
       var age = gtValue(d, "age");
       if (age) gt.push("age " + age + (gtValue(d, "sex") || ""));
+      var note = read(n, "Notes", "");
       if (gt.length) {
-        var note = read(n, "Notes", "");
-        if (note.indexOf("[donor GT:") < 0) { write(n, "Notes", (note ? note + " " : "") + "[donor GT: " + gt.join(", ") + "]"); changed++; }
+        var block = "[donor GT: " + gt.join(", ") + "]";
+        // Rewrite an existing block (so re-choosing PDF vs spreadsheet updates the
+        // fused value); otherwise append a fresh one.
+        if (/\[donor GT:[^\]]*\]/.test(note)) {
+          var nn = note.replace(/\[donor GT:[^\]]*\]/, block);
+          if (nn !== note) { write(n, "Notes", nn); changed++; }
+        } else {
+          write(n, "Notes", (note ? note + " " : "") + block); changed++;
+        }
       }
     });
     if (changed && typeof window.wlpMarkCanvasDirty === "function") window.wlpMarkCanvasDirty();
@@ -1365,6 +1493,7 @@
         serology: col(r, "serology"), gtSource: col(r, "groundtruthsource"),
         deceasedLog: col(r, "deceaseddatelog"), ecdLog: col(r, "endothelialdensitylog"),
         ageLog: col(r, "agelog"), sexLog: col(r, "sexlog"),
+        fieldSources: parseFieldSources(col(r, "logfieldsources")),
         allFields: col(r, "allfields")
       });
     }
@@ -1729,8 +1858,10 @@
       if (!pc || !cc || pc === cc) return;
       var ek = pc.id + ">" + cc.id;
       if (eSeen[ek]) return; eSeen[ek] = true;
+      // Orthogonal (right-angle) connector: down from the parent to a mid-line,
+      // across to the child's date, then down to the child. No curves.
       var my = (pc._y + cc._y) / 2;
-      edges += '<path class="wlpc-tl-edge" d="M' + pc._x.toFixed(1) + " " + pc._y + " C" + pc._x.toFixed(1) + " " + my.toFixed(1) + " " + cc._x.toFixed(1) + " " + my.toFixed(1) + " " + cc._x.toFixed(1) + " " + cc._y + '"/>';
+      edges += '<path class="wlpc-tl-edge" d="M' + pc._x.toFixed(1) + " " + pc._y + " V" + my.toFixed(1) + " H" + cc._x.toFixed(1) + " V" + cc._y + '"/>';
     });
 
     var bands = "";
@@ -1773,12 +1904,11 @@
         "</g>";
     });
 
-    // Date-placed 🔬 icons: one per (passage, imaging date), positioned at the
-    // imaging date along the passage band. Offset ABOVE the band centre line so
-    // they never cover a vessel node (whose glyph sits on the centre line and
-    // steals the central click), and de-collided horizontally so same-week
-    // sessions stay individually clickable. Clickable to open the image.
-    var IMG_R = 8, IMG_SEP = 18, IMG_DY = NR + 4;
+    // Date-placed 🔬 icons: one per (passage, imaging date), sitting ON the passage
+    // band line at the imaging date it was taken. Only nudged apart by a hair when
+    // two dates would otherwise fully overlap (so each stays clickable) — otherwise
+    // each lands exactly on its date. Clickable to open the image.
+    var IMG_R = 7, IMG_SEP = 15;
     var imgIcons = "";
     Object.keys(imgByBand).forEach(function (pk) {
       if (bandTop[pk] == null) return;
@@ -1795,10 +1925,10 @@
           (conds ? " · " + conds : "") + (e.path ? " · click to view" : " · (no path)");
         imgIcons +=
           '<g class="wlpc-tl-imgpt' + (e.path ? " is-openable" : "") + '"' + (e.path ? ' data-img-path="' + esc(e.path) + '"' : "") +
-            ' transform="translate(' + x.toFixed(1) + "," + (yc - IMG_DY) + ')">' +
+            ' transform="translate(' + x.toFixed(1) + "," + yc + ')">' +
             "<title>" + esc(title) + "</title>" +
             '<circle class="wlpc-tl-imgpt-bg" r="' + IMG_R + '"/>' +
-            '<text class="wlpc-tl-imgpt-ico" y="3.4" text-anchor="middle">🔬</text>' +
+            '<text class="wlpc-tl-imgpt-ico" y="3" text-anchor="middle">🔬</text>' +
           "</g>";
       });
     });

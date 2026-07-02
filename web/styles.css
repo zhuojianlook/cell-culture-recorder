@@ -5373,6 +5373,32 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-rc-info > summary { cursor: pointer; font-size: .76rem; color: var(--muted); font-weight: 600; }
 .wlpc-rc-info-list { font-size: .73rem; color: var(--muted); margin-top: 6px; line-height: 1.7; word-break: break-word; }
 
+/* ── Provenance + human-confirm-all (donor ground truth) ──────────────────── */
+/* inline "where a value came from" (file :: tab :: column), muted, inside buttons */
+.wlpc-rc-prov { display: inline-block; margin-left: 5px; font-size: .64rem; font-weight: 400; color: var(--muted); opacity: .85; }
+.wlpc-rc-cf-opt.is-on .wlpc-rc-prov { color: inherit; opacity: .8; }
+/* expandable per-field source table */
+.wlpc-rc-prov-det { display: block; margin-top: 4px; }
+.wlpc-rc-prov-det > summary { cursor: pointer; font-size: .68rem; color: var(--muted); font-weight: 600; list-style: none; }
+.wlpc-rc-prov-det > summary::before { content: "▸ "; }
+.wlpc-rc-prov-det[open] > summary::before { content: "▾ "; }
+.wlpc-rc-pvtab { border-collapse: collapse; margin: 5px 0 2px; font-size: .7rem; }
+.wlpc-rc-pvtab th { text-align: left; color: var(--muted); font-weight: 600; padding: 1px 12px 3px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+.wlpc-rc-pvtab td { padding: 2px 12px 2px 0; color: var(--text); vertical-align: top; }
+.wlpc-rc-pvsrc { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .66rem; }
+/* "not applied yet" state on an unconfirmed match row */
+.wlpc-rc-row.is-unconfirmed { border-left: 2px solid rgba(255,159,10,.5); padding-left: 12px; }
+.wlpc-rc-unconf { font-size: .66rem; font-weight: 700; color: #ff9f0a; background: rgba(255,159,10,.14); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+.wlpc-rc-hint.is-warn { color: #ff453a; font-weight: 600; }
+/* match-quality badge inside a candidate button */
+.wlpc-rc-mq { font-size: .6rem; font-weight: 700; opacity: .9; }
+.wlpc-rc-btn.is-warnmatch { border-color: rgba(255,69,58,.5); color: #ff453a; background: rgba(255,69,58,.08); }
+.wlpc-rc-btn.is-warnmatch:hover { background: rgba(255,69,58,.16); }
+/* confirmed & applied (undo) */
+.wlpc-rc-confirmed > summary { color: #30d158; }
+.wlpc-rc-row.is-confirmed { border-left: 2px solid rgba(48,209,88,.5); padding-left: 12px; }
+.wlpc-rc-appliedto { font-size: .72rem; color: #30d158; font-weight: 600; }
+
 /* ── Cell Culture map: tidy-timeline lane bands + vessel cards ─────────────── */
 .culture-lanes { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
 .culture-lane { position: absolute; left: 0; right: 0; border-top: 1px solid rgba(255,255,255,.05); }
