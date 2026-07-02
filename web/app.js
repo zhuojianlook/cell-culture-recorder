@@ -929,7 +929,8 @@ window.wlpOpenImage = async function (filePath) {
     return { ok: true, mode: "open" };
   } catch (e1) {
     try {
-      await invoke("plugin:opener|reveal_item_in_dir", { path: filePath });
+      // reveal_item_in_dir takes `paths` as an ARRAY (not `path` as a string).
+      await invoke("plugin:opener|reveal_item_in_dir", { paths: [filePath] });
       return { ok: true, mode: "reveal" };
     } catch (e2) {
       return { ok: false, error: String((e2 && e2.message) || e2) };

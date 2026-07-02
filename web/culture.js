@@ -845,7 +845,10 @@
         var dates = g.sessions.map(function (s) { return s.date; }).filter(Boolean).sort();
         var span = dates.length ? (shortDate(dates[0]) + (dates.length > 1 ? "→" + shortDate(dates[dates.length - 1]) : "")) : "";
         var hint = g.ambiguous === "yes" ? "ambiguous — near more than one donor, choose carefully"
-          : (g.nearest ? "likely typo — nearest vessel donor is " + esc(g.nearest) : "no matching vessel — imaged but not in the culture log");
+          : (g.status === "fuzzy" ? "several vessels at this passage — pick which one was imaged"
+          : (g.status === "donor-only" ? "donor matches, but no vessel logged at this passage — pick one or ignore"
+          : (g.nearest ? "likely typo — nearest vessel donor is " + esc(g.nearest)
+          : "no matching vessel — imaged but not in the culture log")));
         html += '<div class="wlpc-rc-row">' +
           '<div class="wlpc-rc-main"><span class="wlpc-rc-id">' + esc(g.donor) + '</span>' +
             (g.passage !== "" ? ' <span class="wlpc-rc-eye">P' + esc(g.passage) + '</span>' : '') +
@@ -1019,10 +1022,18 @@
     });
     groups.forEach(function (g) {
       g.target = ""; g.targetLabel = ""; g.candidates = [];
-      var cp = g.nearest ? (idxCP[g.nearest + "|" + g.passage] || []) : [];
-      if (cp.length) { g.target = cp[0].dataset.nodeId; g.targetLabel = recLabelOf(recordOf(cp[0])); }
+      // Candidate core: the fuzzy "nearest" donor when the filename donor didn't
+      // match, otherwise the session's own donor core (for split / donor-only
+      // groups where the donor is right but the vessel is not uniquely known).
+      var core = g.nearest || LOGIC().donorIdentity(g.donor).core;
+      var amb = (g.ambiguous === "yes" || g.status === "ambiguous");
+      var cp = core ? (idxCP[core + "|" + g.passage] || []) : [];
+      // Offer a one-click "assign to suggested vessel" ONLY when that suggestion is
+      // unique and unambiguous — otherwise force an explicit pick so a low-
+      // confidence guess can't be attached by a single stray click.
+      if (cp.length === 1 && !amb) { g.target = cp[0].dataset.nodeId; g.targetLabel = recLabelOf(recordOf(cp[0])); }
       var seen = {};
-      (g.nearest ? (idxC[g.nearest] || []) : []).forEach(function (n) {
+      (core ? (idxC[core] || []) : []).forEach(function (n) {
         var id = n.dataset.nodeId; if (seen[id]) return; seen[id] = true;
         g.candidates.push({ id: id, label: recLabelOf(recordOf(n)) });
       });
@@ -1424,10 +1435,15 @@
     function col(r, name) { var i = hdr.indexOf(name); return i >= 0 && i < r.length ? String(r[i] == null ? "" : r[i]).trim() : ""; }
 
     var nodes = allCultureVessels();
-    // preserve manual corrections: sessionKey -> nodeId, from the current nodes
-    var manualByKey = {};
+    // Preserve manual corrections at the GROUP level (filename donor|passage ->
+    // nodeId), so a re-import re-attaches EVERY session the user placed on that
+    // vessel — including new imaging dates — without depending on the exact
+    // per-session key (which carries the lossy condition token).
+    var manualByGroup = {};
     nodes.forEach(function (n) {
-      parseImagingSessions(n).forEach(function (s) { if (s.manual && s.key) manualByKey[s.key] = n.dataset.nodeId || ""; });
+      parseImagingSessions(n).forEach(function (s) {
+        if (s.manual && s.donor != null) manualByGroup[s.donor + "|" + (s.passage || "")] = n.dataset.nodeId || "";
+      });
     });
 
     var nodeInfo = nodes.map(function (n) {
@@ -1453,25 +1469,45 @@
       s.key = imgSessionKey(s);
       var entry = { key: s.key, date: s.date, cond: s.cond, images: s.images, path: s.path, donor: s.donor, passage: s.passage };
 
-      // 1) honour a prior manual correction
-      if (manualByKey[s.key] && byId[manualByKey[s.key]]) {
-        byId[manualByKey[s.key]].out.push(Object.assign({ manual: true }, entry)); matched++; continue;
+      // 1) honour a prior manual correction (group-level, so new dates follow it)
+      var gkey = s.donor + "|" + (s.passage || "");
+      if (manualByGroup[gkey] && byId[manualByGroup[gkey]]) {
+        byId[manualByGroup[gkey]].out.push(Object.assign({ manual: true }, entry)); matched++; continue;
       }
-      // 2) high-confidence auto-match: exact donor core + passage
-      if (s.status === "matched" || s.status === "fuzzy" || s.status === "donor-only") {
-        var sid = LOGIC().donorIdentity(s.donor), seen = {}, placed = false;
+      // 2) high-confidence auto-attach: status "matched" (exact donor core +
+      //    passage). Imaging is recorded per PASSAGE and the timeline shows one 🔬
+      //    per passage, so a plain SPLIT — several flasks of the same (or blank)
+      //    eye at this passage — is not ambiguous: attach to a single
+      //    representative rather than fanning the image onto every flask (which
+      //    would double-count fields and pin sibling images to each other).
+      //    Genuine EYE ambiguity — a blank / both-eyes session when the donor has
+      //    BOTH an OD and an OS vessel at this passage — must not be pinned to one
+      //    cornea, so route those to review.
+      if (s.status === "matched") {
+        var sid = LOGIC().donorIdentity(s.donor), seen = {}, cands = [], eyeSet = {};
         sid.aliases.forEach(function (a) {
           (aliasIndex[a] || []).forEach(function (i) {
             if (seen[i]) return; seen[i] = true;
             var ni = nodeInfo[i];
             if (ni.passage !== s.passage || !eyesOk(ni.eye, s.eye)) return;
-            ni.out.push(entry); placed = true;
+            cands.push(i);
+            var e = String(ni.eye || "").toLowerCase(); if (e === "od" || e === "os") eyeSet[e] = true;
           });
         });
-        if (placed) { matched++; continue; }
+        if (cands.length) {
+          var sEye = String(s.eye || "").toLowerCase();
+          var sBlank = (sEye === "" || sEye === "unknown" || sEye === "ou" || sEye === "odos");
+          var eyeAmbiguous = sBlank && eyeSet.od && eyeSet.os;
+          if (!eyeAmbiguous) { nodeInfo[cands[0]].out.push(entry); matched++; continue; }
+          imagingPending.push(s); continue;
+        }
+        // no candidate on this canvas — fall through to review/gap
       }
-      // 3) uncertain / ambiguous / gap-with-suggestion -> review queue
-      if (s.status === "uncertain" || s.status === "ambiguous" || (s.status === "gap" && s.nearest)) {
+      // 3) everything not confidently placed -> review queue. Only sessions with no
+      //    plausible vessel anywhere are counted as gaps (surfaced in the status
+      //    line, never silently dropped).
+      if (s.status === "uncertain" || s.status === "ambiguous" || s.status === "fuzzy" ||
+          s.status === "donor-only" || s.status === "matched" || s.nearest) {
         imagingPending.push(s);
       } else { gap++; }
     }
@@ -1651,10 +1687,22 @@
     });
 
     var datedC = clusters.filter(function (c) { return !isNaN(c.ms); });
-    var domainMs = datedC.map(function (c) { return c.ms; }).concat(imgMs);
-    var minMs = domainMs.length ? Math.min.apply(null, domainMs) : 0;
-    var maxMs = domainMs.length ? Math.max.apply(null, domainMs) : 0;
-    function xOf(ms) { if (isNaN(ms)) return LEFT; if (maxMs === minMs) return (LEFT + RIGHT) / 2; return LEFT + (ms - minMs) / (maxMs - minMs) * (RIGHT - LEFT); }
+    var seedMs = datedC.map(function (c) { return c.ms; });
+    var baseMin = seedMs.length ? Math.min.apply(null, seedMs) : (imgMs.length ? Math.min.apply(null, imgMs) : 0);
+    var baseMax = seedMs.length ? Math.max.apply(null, seedMs) : (imgMs.length ? Math.max.apply(null, imgMs) : 0);
+    // The axis is anchored to the vessel SEED dates. Imaging dates may extend it,
+    // but only within ~120 days of the seed span — a wild typo date (e.g. 2026 on a
+    // 2025 donor) must not rescale and collapse the vessel layout. Out-of-window
+    // icons are clamped to the axis edge by xOf().
+    var PAD = 120 * 24 * 3600 * 1000;
+    var minMs = baseMin, maxMs = baseMax;
+    imgMs.forEach(function (m) { if (m >= baseMin - PAD && m <= baseMax + PAD) { if (m < minMs) minMs = m; if (m > maxMs) maxMs = m; } });
+    function xOf(ms) {
+      if (isNaN(ms)) return LEFT;
+      if (maxMs === minMs) return (LEFT + RIGHT) / 2;
+      var x = LEFT + (ms - minMs) / (maxMs - minMs) * (RIGHT - LEFT);
+      return x < LEFT ? LEFT : (x > RIGHT ? RIGHT : x);
+    }
     function baseX(c) { return xOf(c.ms); }
 
     // Passage bands (numeric ascending, then unknown "P?").
@@ -1726,22 +1774,30 @@
     });
 
     // Date-placed 🔬 icons: one per (passage, imaging date), positioned at the
-    // imaging date along the passage band. Clickable to open the image.
+    // imaging date along the passage band. Offset ABOVE the band centre line so
+    // they never cover a vessel node (whose glyph sits on the centre line and
+    // steals the central click), and de-collided horizontally so same-week
+    // sessions stay individually clickable. Clickable to open the image.
+    var IMG_R = 8, IMG_SEP = 18, IMG_DY = NR + 4;
     var imgIcons = "";
     Object.keys(imgByBand).forEach(function (pk) {
       if (bandTop[pk] == null) return;
       var yc = bandTop[pk] + bandRows[pk] * SUBH / 2;
       var band = imgByBand[pk];
-      Object.keys(band).forEach(function (dateStr) {
-        var e = band[dateStr];
+      var entries = Object.keys(band).map(function (d) { return { d: d, e: band[d], x: xOf(band[d].ms) }; });
+      entries.sort(function (a, b) { return a.x - b.x; });
+      var lastX = -1e9;
+      entries.forEach(function (it) {
+        var x = it.x; if (x < lastX + IMG_SEP) x = lastX + IMG_SEP; if (x > RIGHT) x = RIGHT; lastX = x;
+        var e = it.e;
         var conds = Object.keys(e.conds).join(", ");
-        var title = "🔬 " + shortDate(dateStr) + " · " + e.imgs + " field" + (e.imgs === 1 ? "" : "s") +
+        var title = "🔬 " + shortDate(it.d) + " · " + e.imgs + " field" + (e.imgs === 1 ? "" : "s") +
           (conds ? " · " + conds : "") + (e.path ? " · click to view" : " · (no path)");
         imgIcons +=
           '<g class="wlpc-tl-imgpt' + (e.path ? " is-openable" : "") + '"' + (e.path ? ' data-img-path="' + esc(e.path) + '"' : "") +
-            ' transform="translate(' + xOf(e.ms).toFixed(1) + "," + yc + ')">' +
+            ' transform="translate(' + x.toFixed(1) + "," + (yc - IMG_DY) + ')">' +
             "<title>" + esc(title) + "</title>" +
-            '<circle class="wlpc-tl-imgpt-bg" r="8"/>' +
+            '<circle class="wlpc-tl-imgpt-bg" r="' + IMG_R + '"/>' +
             '<text class="wlpc-tl-imgpt-ico" y="3.4" text-anchor="middle">🔬</text>' +
           "</g>";
       });
