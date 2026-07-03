@@ -565,7 +565,7 @@
   }
 
   // ── Per-well plate editor (a 2×N well grid; each well is its own entry) ──────
-  var plateModal = null, plateNode = null, plateDraft = [], plateSel = "", plateOrigSig = "";
+  var plateModal = null, plateNode = null, plateDraft = [], plateSel = "", plateOrigSig = "", plateCloseArmed = false;
   function pval(id) { return plateModal.querySelector("#" + id); }
   function draftWell(id) { var t = normWellId(id), f = null; plateDraft.forEach(function (w) { if (normWellId(w.well) === t) f = w; }); return f; }
   function buildPlateModal() {
@@ -620,10 +620,24 @@
       .map(function (w) { return WELL_FIELDS.map(function (k) { return String(w[k] == null ? "" : w[k]).trim(); }); })
       .sort(function (a, b) { return compareWellIds_(a[0], b[0]); }));
   }
+  // Reset the "click again to discard" state + Close button back to normal.
+  function disarmClose() {
+    plateCloseArmed = false;
+    if (!plateModal) return;
+    var btn = pval("wlpwCancel");
+    if (btn) { btn.textContent = "Close"; btn.style.color = ""; btn.style.borderColor = ""; }
+  }
+  // Guarded close (Close / backdrop / Escape). With unsaved edits, the first attempt
+  // arms the Close button ("Discard changes — click again") instead of a native
+  // confirm() (which the Tauri WebView doesn't render); a second click discards.
   function hidePlateGuarded() {
     if (plateModal) readFormIntoDraft();
-    if (plateNode && draftSig(plateDraft) !== plateOrigSig && typeof window.confirm === "function" &&
-        !window.confirm("Discard unsaved well changes?")) return;
+    if (plateNode && draftSig(plateDraft) !== plateOrigSig && !plateCloseArmed) {
+      plateCloseArmed = true;
+      var btn = pval("wlpwCancel");
+      if (btn) { btn.textContent = "Discard changes — click again"; btn.style.color = "#ff6961"; btn.style.borderColor = "rgba(255,105,97,.5)"; }
+      return;
+    }
     hidePlate();
   }
   function openPlateRecord(node, wellToSelect) {
@@ -638,6 +652,7 @@
     plateSel = normWellId(wellToSelect || (plateDraft[0] && plateDraft[0].well) || ids[0] || "A1");
     renderWellGrid();
     loadWellIntoForm();
+    disarmClose();
     plateModal.classList.remove("is-hidden");
     plateModal.style.display = "flex";
     try { pval("wlpwDonor").focus(); } catch (e) { /* ignore */ }
@@ -674,7 +689,7 @@
       btn.addEventListener("click", function () { selectWell(btn.getAttribute("data-well")); });
     });
   }
-  function selectWell(id) { readFormIntoDraft(); plateSel = normWellId(id); renderWellGrid(); loadWellIntoForm(); }
+  function selectWell(id) { readFormIntoDraft(); disarmClose(); plateSel = normWellId(id); renderWellGrid(); loadWellIntoForm(); }
   function loadWellIntoForm() {
     var w = draftWell(plateSel) || {};
     pval("wlpwSelLbl").textContent = "Well " + plateSel;
@@ -694,8 +709,10 @@
     if (i >= 0) plateDraft[i] = entry; else plateDraft.push(entry);
   }
   function clearWell() {
-    if (typeof window.confirm === "function" && !window.confirm("Remove well " + plateSel + "? This clears its entry.")) return;
+    // Only edits the unsaved draft (nothing persists until Save), and the grid shows
+    // the well emptied immediately, so no native confirm is needed.
     plateDraft = plateDraft.filter(function (w) { return normWellId(w.well) !== plateSel; });
+    disarmClose();
     loadWellIntoForm();
     renderWellGrid();
   }
@@ -726,6 +743,7 @@
   }
   function hidePlate() {
     if (!plateModal) return;
+    disarmClose();
     plateModal.classList.add("is-hidden");
     plateModal.style.display = "none";
     plateNode = null; plateDraft = []; plateSel = "";
