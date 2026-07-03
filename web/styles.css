@@ -1529,6 +1529,8 @@ button:hover {
   width: 28px;
   height: 28px;
   opacity: 0.95;
+  /* above the semi-opaque .plate-well-overlay so seeded-well colours stay visible */
+  z-index: 2;
 }
 
 .drop--plate .drop__icon .lab-icon {
@@ -5369,14 +5371,16 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-rc-btn.is-go { border-color: rgba(100,210,255,.5); color: #64d2ff; }
 .wlpc-rc-btn.is-go:hover { background: rgba(100,210,255,.14); }
 .wlpc-rc-sel { padding: 3px 6px; border-radius: 7px; border: 1px solid rgba(142,142,147,.3); background: rgba(28,28,30,.9); color: var(--text); font-size: .76rem; max-width: 240px; }
-.wlpc-rc-more { font-size: .74rem; color: var(--muted); padding: 4px 0; }
+.wlpc-rc-more { font-size: .74rem; color: var(--muted); padding: 4px 14px; }
+.wlpc-rc-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 14px 2px; }
+.wlpc-rc-filter { padding: 3px 8px; border-radius: 7px; border: 1px solid rgba(142,142,147,.3); background: rgba(28,28,30,.9); color: var(--text); font-size: .76rem; min-width: 160px; }
 .wlpc-rc-info { padding: 6px 14px; border-top: 1px solid rgba(255,255,255,.05); }
 .wlpc-rc-info > summary { cursor: pointer; font-size: .76rem; color: var(--muted); font-weight: 600; }
 .wlpc-rc-info-list { font-size: .73rem; color: var(--muted); margin-top: 6px; line-height: 1.7; word-break: break-word; }
 
 /* ── Provenance + human-confirm-all (donor ground truth) ──────────────────── */
 /* inline "where a value came from" (file :: tab :: column), muted, inside buttons */
-.wlpc-rc-prov { display: inline-block; margin-left: 5px; font-size: .64rem; font-weight: 400; color: var(--muted); opacity: .85; }
+.wlpc-rc-prov { display: inline-block; margin-left: 5px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; font-size: .64rem; font-weight: 400; color: var(--muted); opacity: .85; }
 .wlpc-rc-cf-opt.is-on .wlpc-rc-prov { color: inherit; opacity: .8; }
 /* expandable per-field source table */
 .wlpc-rc-prov-det { display: block; margin-top: 4px; }
@@ -5386,7 +5390,7 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-rc-pvtab { border-collapse: collapse; margin: 5px 0 2px; font-size: .7rem; }
 .wlpc-rc-pvtab th { text-align: left; color: var(--muted); font-weight: 600; padding: 1px 12px 3px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
 .wlpc-rc-pvtab td { padding: 2px 12px 2px 0; color: var(--text); vertical-align: top; }
-.wlpc-rc-pvsrc { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .66rem; }
+.wlpc-rc-pvsrc { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .66rem; overflow-wrap: anywhere; }
 /* "not applied yet" state on an unconfirmed match row */
 .wlpc-rc-row.is-unconfirmed { border-left: 2px solid rgba(255,159,10,.5); padding-left: 12px; }
 .wlpc-rc-unconf { font-size: .66rem; font-weight: 700; color: #ff9f0a; background: rgba(255,159,10,.14); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
@@ -5395,6 +5399,9 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-rc-mq { font-size: .6rem; font-weight: 700; opacity: .9; }
 .wlpc-rc-btn.is-warnmatch { border-color: rgba(255,69,58,.5); color: #ff453a; background: rgba(255,69,58,.08); }
 .wlpc-rc-btn.is-warnmatch:hover { background: rgba(255,69,58,.16); }
+/* a loose (alias-only) match is a softer amber than the red opposite-cornea / year mismatch */
+.wlpc-rc-btn.is-warnloose { border-color: rgba(255,159,10,.5); color: #ff9f0a; background: rgba(255,159,10,.08); }
+.wlpc-rc-btn.is-warnloose:hover { background: rgba(255,159,10,.16); }
 /* confirmed & applied (undo) */
 .wlpc-rc-confirmed > summary { color: #30d158; }
 .wlpc-rc-row.is-confirmed { border-left: 2px solid rgba(48,209,88,.5); padding-left: 12px; }
@@ -5405,16 +5412,19 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpw-well { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; min-height: 42px; padding: 5px 8px; border-radius: 8px; border: 1px solid rgba(142,142,147,.28); background: rgba(255,255,255,.03); color: var(--text); cursor: pointer; text-align: left; transition: background 120ms ease, border-color 120ms ease; }
 .wlpw-well:hover { background: rgba(255,255,255,.08); }
 .wlpw-well.is-filled { background: rgba(120,170,255,.08); }
-.wlpw-well.is-sel { border-color: #64d2ff; box-shadow: 0 0 0 1px rgba(100,210,255,.5) inset; }
-.wlpw-well-id { font-size: .7rem; font-weight: 700; color: #8e8e93; }
+/* selection cue via OUTLINE (an inline border-left status stripe would override a border) */
+.wlpw-well.is-sel { border-color: #64d2ff; outline: 2px solid #64d2ff; outline-offset: 1px; }
+.wlpw-well-id { font-size: .7rem; font-weight: 700; color: #c7c7cc; }
 .wlpw-well.is-filled .wlpw-well-id, .wlpw-well.is-sel .wlpw-well-id { color: #cfe3ff; }
 .wlpw-well-donor { font-size: .74rem; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.wlpw-well-empty { font-size: 1rem; color: #48484a; line-height: 1; }
+.wlpw-well-empty { font-size: 1rem; color: #8e8e93; line-height: 1; }
 /* table: plate summary + per-well sub-rows */
 .wlpc-plate-sum > td { border-top: 1px solid rgba(255,255,255,.06); }
 .wlpc-plate-hint { font-size: .68rem; color: var(--muted); margin-left: 8px; }
-.wlpc-well-row > td { background: rgba(255,255,255,.014); }
-.wlpc-well-row .wlpc-col-label { padding-left: 22px; }
+.wlpc-table tbody tr[data-plate-id] { cursor: pointer; }
+.wlpc-table tbody tr[data-plate-id]:hover > td { background: rgba(120,170,255,.09); }
+.wlpc-well-row > td { background: rgba(120,170,255,.05); }
+.wlpc-well-row .wlpc-col-label { padding-left: 40px !important; }
 .wlpc-well-tag { display: inline-block; min-width: 26px; text-align: center; font-size: .64rem; font-weight: 700; color: #cfe3ff; background: rgba(120,170,255,.16); border-radius: 5px; padding: 1px 5px; margin-right: 6px; }
 /* canvas plate glyph: seeded wells coloured by status + a "N seeded" badge */
 .plate-glyph-well { transition: fill 120ms ease; }

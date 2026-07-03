@@ -5294,7 +5294,7 @@ function placeIcon({ x, y, iconId, label, forceCanvas = false, skipStartModal = 
   enableLabelEditing(nameInput);
   autosizeLabel(nameInput);
   if (isAnimalProcedure) renderAnimalProcedureBadge(drop);
-  if (isMultiWellPlateNode(drop)) { renderPlateNodeOverlay(drop); paintPlateGlyphRecords(drop); }
+  if (isMultiWellPlateNode(drop)) renderPlateNodeOverlay(drop); // paints the glyph at its tail
   applyWorkspaceVisibility();
   applyPlanningDependencyVisuals();
   renderPlanningTaskPanel();
@@ -5377,7 +5377,7 @@ function wireDropNode(drop) {
   });
   enableMove(drop);
   if (isAnimalProcedureNode(drop)) renderAnimalProcedureBadge(drop);
-  if (isMultiWellPlateNode(drop)) { renderPlateNodeOverlay(drop); paintPlateGlyphRecords(drop); }
+  if (isMultiWellPlateNode(drop)) renderPlateNodeOverlay(drop); // paints the glyph at its tail
 }
 
 function isAnimalProcedureNode(node) {
@@ -13050,7 +13050,9 @@ function paintPlateGlyphRecords(node) {
   try { wells = JSON.parse(node.dataset.cultureWells || "[]"); } catch (e) { wells = []; }
   const seeded = {};
   (Array.isArray(wells) ? wells : []).forEach((w) => {
-    if (w && w.well && (w.donor || w.eye || w.passage || w.status || w.seedDate || w.notes)) {
+    // Match culture.js wellFilled: default eye="unknown"/status="active" don't count.
+    if (w && w.well && (w.donor || w.passage || w.seedDate || w.notes ||
+        (w.eye && w.eye !== "unknown") || (w.status && w.status !== "active"))) {
       seeded[String(w.well).toUpperCase()] = w;
     }
   });

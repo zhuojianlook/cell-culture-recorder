@@ -33,6 +33,10 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.57", date: "2026-07-03", changes: [
+      "Review fixes + UI polish. Bugs: a microscopy 🔬 icon on the same date as a vessel no longer steals that vessel's click; canvas plate glyphs no longer wash out their seeded-well colours under the media overlay; a seeded plate used in a lineage no longer drops its connector / falsely flags its child as orphan on the Timeline; browsing through empty wells no longer creates phantom “seeded” wells, and clearing every well now sticks (no ghost A1 on reload); plate well sub-rows in the table now show their Medium; the “N vessels” count agrees between Table and Timeline.",
+      "The donor “Confirm & apply” list is no longer a dead-end past 30: an “Apply all exact single matches (N)” bulk button, a donor-id filter, and a “Show 30 more” pager. The per-well plate editor now works for 24/96/384-well plates (scrolling grid), warns before discarding unsaved wells (and on Escape), moved “Remove this well” to the footer with a confirm, autofocuses the donor field, and has a clearer selected-well highlight. A “loose match” now reads amber (distinct from the red opposite-cornea / year-mismatch), and long provenance paths no longer balloon the conflict buttons.",
+    ] },
     { version: "0.2.56", date: "2026-07-02", changes: [
       "Multiwell-plate wells now show up everywhere. On the Timeline, each seeded well is its own point placed in its donor's passage band (tagged with its well id, e.g. A1) — so a plate seeded with different donors across its wells appears under each donor; click a well point to edit it. On the planning canvas, a plate's glyph now colours in the wells that have a record (by status) and shows a small “N seeded” badge, so you can see at a glance which wells are filled. Completes the per-well plate support across the editor, the Records table, the Timeline, and the canvas.",
     ] },

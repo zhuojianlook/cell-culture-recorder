@@ -47,6 +47,7 @@
       passage: read(node, "Passage", ""),
       seedDate: read(node, "SeedDate", ""),
       status: read(node, "Status", "active"),
+      medium: read(node, "Medium", ""),
       imaging: read(node, "Imaging", ""),
       imagingSessions: parseImagingSessions(node),
       parentNodeId: read(node, "ParentNodeId", ""),
@@ -69,12 +70,27 @@
   // Like allRecords(), but a seeded multiwell plate is fanned into one record PER
   // well (each under its own donor). Used by the TIMELINE so each well appears as
   // its own point; the table + reconcile keep the plate-as-one-node view.
+  var PLATE_WELL_FANOUT_MAX = 8;
   function allRecordsExpanded() {
+    var nodes = allCultureVessels();
+    // Node ids referenced as a lineage PARENT by some vessel — so a plate used as a
+    // parent still resolves its children's edges even when it's fanned into wells.
+    var referencedParent = {};
+    nodes.forEach(function (n) { var p = read(n, "ParentNodeId", ""); if (p) referencedParent[p] = true; });
     var out = [];
-    allCultureVessels().forEach(function (n) {
+    nodes.forEach(function (n) {
       if (isPlateNode(n)) {
         var w = plateWellRecords(n);
-        if (w.length) { w.forEach(function (r) { out.push(r); }); return; }
+        // Fan out only a manageable number of wells; a large plate (e.g. 96-well)
+        // stays a single node so the timeline doesn't explode to thousands of rows.
+        if (w.length && w.length <= PLATE_WELL_FANOUT_MAX) {
+          var id = n.dataset.nodeId || "";
+          // Keep the plate's own node too when it takes part in lineage (it's a
+          // parent, or it has one) so edges resolve and it isn't flagged orphan.
+          if (read(n, "ParentNodeId", "") || referencedParent[id]) out.push(recordOf(n));
+          w.forEach(function (r) { out.push(r); });
+          return;
+        }
       }
       out.push(recordOf(n));
     });
@@ -107,7 +123,13 @@
   function isPlateNode(n) { return !!(n && window.isMultiWellPlateNode && window.isMultiWellPlateNode(n)); }
   function plateWellCount(n) { return (n && window.getPlateWellCount && window.getPlateWellCount(n.dataset.iconId)) || 0; }
   function plateWellIds(n) { return (window.getPlateWellIds && window.getPlateWellIds(plateWellCount(n))) || []; }
-  function wellFilled(w) { return !!(w && w.well && (w.donor || w.eye || w.passage || w.status || w.seedDate || w.notes)); }
+  // A well counts as "seeded" only if it has real content — the default
+  // eye="unknown"/status="active" a browsed-but-untouched well carries do NOT
+  // count (otherwise merely clicking through wells would persist phantom entries).
+  function wellFilled(w) {
+    return !!(w && w.well && (w.donor || w.passage || w.seedDate || w.notes ||
+      (w.eye && w.eye !== "unknown") || (w.status && w.status !== "active")));
+  }
   function normWellId(id) { return (window.parseWellId ? window.parseWellId(id).text : String(id || "")).toUpperCase(); }
   function parseWells(node) {
     try { var a = JSON.parse((node && node.dataset.cultureWells) || "[]"); return Array.isArray(a) ? a.filter(wellFilled) : []; }
@@ -121,7 +143,9 @@
       var nd = Object.keys(donors).length;
       write(node, "WellsSummary", clean.length + " well" + (clean.length === 1 ? "" : "s") + " · " + nd + " donor" + (nd === 1 ? "" : "s"));
     } else {
-      delete node.dataset.cultureWells;
+      // Keep the "[]" marker (not delete) so ensureWellsMigrated treats the plate
+      // as migrated-but-empty and does NOT resurrect well A1 from the stale scalars.
+      node.dataset.cultureWells = "[]";
       write(node, "WellsSummary", "");
     }
   }
@@ -541,7 +565,7 @@
   }
 
   // ── Per-well plate editor (a 2×N well grid; each well is its own entry) ──────
-  var plateModal = null, plateNode = null, plateDraft = [], plateSel = "";
+  var plateModal = null, plateNode = null, plateDraft = [], plateSel = "", plateOrigSig = "";
   function pval(id) { return plateModal.querySelector("#" + id); }
   function draftWell(id) { var t = normWellId(id), f = null; plateDraft.forEach(function (w) { if (normWellId(w.well) === t) f = w; }); return f; }
   function buildPlateModal() {
@@ -550,12 +574,12 @@
     b.className = "modal-backdrop modal-backdrop--center is-hidden";
     b.style.zIndex = "10000";
     b.innerHTML =
-      '<div class="modal" style="margin-top:7vh;max-width:600px;width:600px">' +
+      '<div class="modal" style="margin-top:6vh;width:min(600px,94vw);max-height:88vh">' +
         '<div class="modal__header" style="display:flex;align-items:center;justify-content:space-between">' +
           '<h3 style="margin:0">Plate wells</h3>' +
           '<span id="wlpwType" style="font-size:.8125rem;color:var(--muted,#8e8e93)"></span>' +
         '</div>' +
-        '<div class="modal__body" style="display:block">' +
+        '<div class="modal__body" style="display:block;overflow:auto">' +
           '<div style="font-size:.74rem;color:#8e8e93;margin-bottom:8px">Click a well to edit its entry — each well can hold its own donor / passage / status.</div>' +
           '<div id="wlpwGrid" style="display:grid;gap:6px;margin-bottom:14px"></div>' +
           '<div id="wlpwForm" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
@@ -565,20 +589,22 @@
             fieldNum("wlpwPassage", "Passage #") +
             fieldSelect("wlpwStatus", "Status", STATUSES) +
             fieldDate("wlpwSeedDate", "Seed date") +
-            '<div class="field"><label>&nbsp;</label><button type="button" id="wlpwClear" class="btn" style="width:100%">Clear this well</button></div>' +
             '<div class="field" style="grid-column:1/-1"><label for="wlpwNotes">Notes</label>' +
               '<textarea id="wlpwNotes" class="modal__input" rows="2" style="resize:vertical"></textarea></div>' +
           '</div>' +
         '</div>' +
-        '<div class="modal__footer" style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">' +
+        '<div class="modal__footer" style="display:flex;align-items:center;gap:8px;margin-top:6px">' +
+          '<button type="button" id="wlpwClear" class="btn" style="color:#ff6961;border-color:rgba(255,105,97,.4)">Remove this well</button>' +
+          '<span style="flex:1"></span>' +
           '<button type="button" id="wlpwCancel" class="btn">Close</button>' +
           '<button type="button" id="wlpwSave" class="btn btn--primary">Save wells</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(b);
     plateModal = b;
-    b.addEventListener("click", function (e) { if (e.target === b) hidePlate(); });
-    pval("wlpwCancel").addEventListener("click", hidePlate);
+    b.addEventListener("click", function (e) { if (e.target === b) hidePlateGuarded(); });
+    b.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.stopPropagation(); hidePlateGuarded(); } });
+    pval("wlpwCancel").addEventListener("click", hidePlateGuarded);
     pval("wlpwSave").addEventListener("click", savePlate);
     pval("wlpwClear").addEventListener("click", clearWell);
     ["wlpwDonor", "wlpwEye", "wlpwPassage", "wlpwStatus", "wlpwSeedDate", "wlpwNotes"].forEach(function (id) {
@@ -588,12 +614,25 @@
     });
     return plateModal;
   }
+  // A stable signature of the seeded wells, for the unsaved-changes guard.
+  function draftSig(arr) {
+    return JSON.stringify((arr || []).filter(wellFilled)
+      .map(function (w) { return WELL_FIELDS.map(function (k) { return String(w[k] == null ? "" : w[k]).trim(); }); })
+      .sort(function (a, b) { return compareWellIds_(a[0], b[0]); }));
+  }
+  function hidePlateGuarded() {
+    if (plateModal) readFormIntoDraft();
+    if (plateNode && draftSig(plateDraft) !== plateOrigSig && typeof window.confirm === "function" &&
+        !window.confirm("Discard unsaved well changes?")) return;
+    hidePlate();
+  }
   function openPlateRecord(node, wellToSelect) {
     if (!node) return;
     ensureWellsMigrated(node);
     buildPlateModal();
     plateNode = node;
     plateDraft = parseWells(node).map(function (w) { var o = {}; WELL_FIELDS.forEach(function (k) { o[k] = w[k] == null ? "" : String(w[k]); }); return o; });
+    plateOrigSig = draftSig(plateDraft);
     pval("wlpwType").textContent = vesselTypeFromIcon(node);
     var ids = plateWellIds(node);
     plateSel = normWellId(wellToSelect || (plateDraft[0] && plateDraft[0].well) || ids[0] || "A1");
@@ -601,6 +640,7 @@
     loadWellIntoForm();
     plateModal.classList.remove("is-hidden");
     plateModal.style.display = "flex";
+    try { pval("wlpwDonor").focus(); } catch (e) { /* ignore */ }
   }
   function renderWellGrid() {
     if (!plateNode) return;
@@ -612,7 +652,13 @@
     var cols = 1;
     ids.forEach(function (id) { var p = window.parseWellId ? window.parseWellId(id) : null; if (p && p.col > cols) cols = p.col; });
     grid.style.display = "grid";
-    grid.style.gridTemplateColumns = "repeat(" + cols + ", minmax(0, 1fr))";
+    grid.style.maxHeight = "52vh";
+    grid.style.overflow = "auto";
+    // Small plates (≤6 cols: 6/12/24-well) keep the true physical layout; big plates
+    // (96/384/1536-well) wrap into a scrollable grid of readable ~56px cells.
+    grid.style.gridTemplateColumns = cols <= 6
+      ? "repeat(" + cols + ", minmax(0, 1fr))"
+      : "repeat(auto-fill, minmax(56px, 1fr))";
     grid.innerHTML = ids.map(function (id) {
       var w = draftWell(id), filled = wellFilled(w), sel = normWellId(id) === plateSel;
       var color = filled ? statusColor(w.status || "active") : "transparent";
@@ -648,6 +694,7 @@
     if (i >= 0) plateDraft[i] = entry; else plateDraft.push(entry);
   }
   function clearWell() {
+    if (typeof window.confirm === "function" && !window.confirm("Remove well " + plateSel + "? This clears its entry.")) return;
     plateDraft = plateDraft.filter(function (w) { return normWellId(w.well) !== plateSel; });
     loadWellIntoForm();
     renderWellGrid();
@@ -666,6 +713,10 @@
       write(plateNode, "Passage", first.passage || "");
       write(plateNode, "Status", first.status || "active");
       write(plateNode, "SeedDate", first.seedDate || "");
+    } else {
+      // No wells left — clear the scalar default too, so migration can't resurrect
+      // a well from a stale scalar donor/passage.
+      ["Donor", "Eye", "Passage", "SeedDate"].forEach(function (k) { write(plateNode, k, ""); });
     }
     if (typeof window.wlpMarkCanvasDirty === "function") { try { window.wlpMarkCanvasDirty(); } catch (e) { /* ignore */ } }
     try { renderBadges(); } catch (e) { /* ignore */ }
@@ -891,6 +942,8 @@
   // donors with no vessel and vessels with no donor record. The user confirms,
   // links, or dismisses each; confirming fuses ground truth onto the vessel(s).
   var reconcileCollapsed = false;
+  var confirmShown = 30;      // how many donor-match rows to render (paged)
+  var confirmFilter = "";     // substring filter over the donor id
   var donorsHydrateTried = false;
   // The effective value for a ground-truth field: the PDF value by default, or the
   // spreadsheet ("log") value if the user chose it for this donor.
@@ -1062,13 +1115,21 @@
     // flagged red and never pre-selected.
     var QB = {
       exact: { cls: "", badge: "✓ id match" },
-      weak: { cls: " is-warnmatch", badge: "⚠ loose match" },
+      weak: { cls: " is-warnloose", badge: "⚠ loose match" },
       year: { cls: " is-warnmatch", badge: "⚠ year mismatch" },
       eye: { cls: " is-warnmatch", badge: "⚠ opposite cornea" }
     };
     if (fuzzy.length) {
-      html += '<div class="wlpc-rc-sec"><div class="wlpc-rc-sec-hd">Confirm &amp; apply donor ground truth — nothing is applied until you confirm (' + fuzzy.length + ')</div>';
-      fuzzy.slice(0, 30).forEach(function (f) {
+      var filt = confirmFilter.trim().toLowerCase();
+      var fshown = filt ? fuzzy.filter(function (f) { return String(f.donor.donor || "").toLowerCase().indexOf(filt) >= 0; }) : fuzzy;
+      var exactN = fuzzy.filter(function (f) { return f.single && f.cands && f.cands[0] && f.cands[0].quality === "exact"; }).length;
+      html += '<div class="wlpc-rc-sec"><div class="wlpc-rc-sec-hd">Confirm &amp; apply donor ground truth — nothing is applied until you confirm (' + fuzzy.length + ')</div>' +
+        '<div class="wlpc-rc-tools">' +
+          (exactN ? '<button type="button" class="wlpc-rc-btn is-go" data-rc-applyexact="1">✓ Apply all exact single matches (' + exactN + ')</button>' : '') +
+          '<input type="text" class="wlpc-rc-filter" data-rc-filter placeholder="filter by donor id…" value="' + esc(confirmFilter) + '">' +
+          (filt ? '<span class="wlpc-rc-hint">' + fshown.length + ' of ' + fuzzy.length + ' match "' + esc(confirmFilter) + '"</span>' : '') +
+        '</div>';
+      fshown.slice(0, confirmShown).forEach(function (f) {
         var idx = donorsAll.indexOf(f.donor);
         var gt = donorGtBits(f.donor);
         var flagged = (f.cands || []).some(function (c) { return c.quality === "eye" || c.quality === "year"; });
@@ -1090,7 +1151,7 @@
             '<button type="button" class="wlpc-rc-btn" data-rc-dismiss="' + idx + '">not a match</button>' +
           '</div></div>';
       });
-      if (fuzzy.length > 30) html += '<div class="wlpc-rc-more">…and ' + (fuzzy.length - 30) + ' more</div>';
+      if (fshown.length > confirmShown) html += '<div class="wlpc-rc-more"><button type="button" class="wlpc-rc-btn" data-rc-showmore="1">Show 30 more (' + (fshown.length - confirmShown) + ' hidden)</button></div>';
       html += '</div>';
     }
 
@@ -1209,6 +1270,8 @@
       if (ia != null) { assignImaging(ia, t.getAttribute("data-img-node")); return; }
       var ig = t.getAttribute && t.getAttribute("data-img-ignore");
       if (ig != null) { ignoreImaging(ig); return; }
+      if (t.getAttribute && t.getAttribute("data-rc-applyexact") != null) { applyExactSingles(); return; }
+      if (t.getAttribute && t.getAttribute("data-rc-showmore") != null) { confirmShown += 30; renderReconcilePanel(); return; }
     };
     box.onchange = function (e) {
       var pick = e.target.getAttribute && e.target.getAttribute("data-img-pick");
@@ -1216,6 +1279,31 @@
       var sel = e.target.getAttribute && e.target.getAttribute("data-rc-orphan");
       if (sel != null && e.target.value) setOrphanParent(sel, e.target.value);
     };
+    // live filter — re-render on each keystroke, preserving focus + caret
+    box.oninput = function (e) {
+      if (!(e.target.getAttribute && e.target.getAttribute("data-rc-filter") != null)) return;
+      confirmFilter = e.target.value; confirmShown = 30;
+      var caret = e.target.selectionStart;
+      renderReconcilePanel();
+      var again = box.querySelector("[data-rc-filter]");
+      if (again) { again.focus(); try { again.setSelectionRange(caret, caret); } catch (err) { /* ignore */ } }
+    };
+  }
+  // Bulk-confirm every donor whose SINGLE candidate is an exact id match — the safe
+  // subset — in one pass with a single re-render.
+  function applyExactSingles() {
+    var donorsAll = (typeof window.wlpLoadCultureDonors === "function") ? (window.wlpLoadCultureDonors() || []) : [];
+    var active = donorsAll.filter(function (d) { return !d._dismissed && !d.confirmedVessel; });
+    var rec = LOGIC().reconcileDonors(active, allRecords());
+    var n = 0;
+    (rec.fuzzy || []).forEach(function (f) {
+      if (f.single && f.cands && f.cands[0] && f.cands[0].quality === "exact") {
+        f.donor.confirmedVessel = f.cands[0].vessel; fuseDonorOntoVessels(f.donor, f.cands[0].vessel); n++;
+      }
+    });
+    if (n && typeof window.wlpSaveCultureDonors === "function") window.wlpSaveCultureDonors(donorsAll);
+    renderView();
+    showImportStatus("Applied " + n + " exact single donor match" + (n === 1 ? "" : "es") + " and fused their ground truth.", false);
   }
 
   function confirmDonorMatch(idx, vesselDonor) {
@@ -1985,7 +2073,10 @@
     var body = view.querySelector("#wlpcGridBody");
     var all = allRecordsExpanded(); // each seeded plate well is its own timeline point
     var shown = filteredRecords(all);
-    updateSubtitle(all, shown);
+    // Count physical vessels (nodes) in the subtitle so it matches the Table view —
+    // the timeline still *renders* the fanned-out per-well points.
+    var nodeRecs = allRecords();
+    updateSubtitle(nodeRecs, filteredRecords(nodeRecs));
     var forest = LOGIC().buildLineageForest(shown);
     if (!forest.length) {
       body.innerHTML = emptyMessage(all.length > 0);
@@ -2210,7 +2301,10 @@
       });
     });
 
-    return '<svg class="wlpc-tl-svg" viewBox="0 0 1000 ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + edges + nodes + imgIcons + "</svg>";
+    // Paint 🔬 icons BEFORE nodes so that when an imaging date coincides with a
+    // vessel's seed date (same x on the band line) the vessel node is on top and
+    // wins the click — the icon still opens elsewhere along the line.
+    return '<svg class="wlpc-tl-svg" viewBox="0 0 1000 ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + edges + imgIcons + nodes + "</svg>";
   }
 
   // Show the records view (and hide the canvas + palette) while the recorder
