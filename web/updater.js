@@ -33,6 +33,11 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.59", date: "2026-09-08", changes: [
+      "Display fixes across the whole app. The root cause of many of them: every inline style in the app was being silently blocked by the desktop shell's content-security policy, so elements meant to be hidden (a stray “Choose File” control, an empty grey bar) were showing, and status pills lost their colour. Those now render correctly — Active is green again.",
+      "Things you could not reach or read are fixed: the culture-record editor now keeps its title and the Save row on screen and scrolls its fields (before, on a short window, the top of the form and the Save button were off-screen); the Timeline no longer shrinks its own labels to an unreadable size on a narrow panel; the “Needs confirmation” panel is capped and scrolls, instead of pushing the records table several screens down; and the left palette scrolls, so Storage / Export Project Data are always reachable.",
+      "Readability and spacing: the Records table now has proper column widths, so “6-well plate” fits on one line and rows are a uniform height; long donor ids and labels truncate with a tooltip instead of stretching the app wider than the window; the “no warnings” tick and the donor-group headings have readable contrast; vessel status and “N seeded” badges no longer sit on top of a plate's own labels; and hovering a vessel lifts its label above its neighbours' when dates overlap.",
+    ] },
     { version: "0.2.58", date: "2026-07-03", changes: [
       "Performance: switching between the Cell Culture map and Cell Culture Records is much snappier, and the map no longer feels janky while idle. The needs-attention warnings for every vessel are now computed in a single pass (indexed by donor/eye, label and source id) instead of re-scanning all ~600 vessels once per vessel — so the map's status badges (which refresh on a timer), the Records table, and the Timeline all render in roughly linear time. Vessel status badges also skip redundant redraws when nothing changed.",
     ] },
