@@ -184,12 +184,15 @@
     backdrop.className = "modal-backdrop modal-backdrop--center is-hidden";
     backdrop.style.zIndex = "10000";
     backdrop.innerHTML =
-      '<div class="modal" style="margin-top:8vh;max-width:560px;width:560px">' +
+      // max-height + a scrolling body keep the header and the Save footer on screen
+      // at the app's 700px minimum height (the form is ~890px tall, more with the
+      // provenance section open); only the fields scroll.
+      '<div class="modal" style="margin-top:6vh;max-width:560px;width:560px;max-height:88vh">' +
         '<div class="modal__header" style="display:flex;align-items:center;justify-content:space-between">' +
           '<h3 style="margin:0">Culture record</h3>' +
           '<span id="wlpcRecVessel" style="font-size:.8125rem;color:var(--muted,#8e8e93)"></span>' +
         '</div>' +
-        '<div class="modal__body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
+        '<div class="modal__body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;overflow:auto">' +
           // Record type — the first, framing choice for every record.
           '<div class="field" style="grid-column:1/-1">' +
             '<label for="wlpcSourceType">Record type</label>' +
@@ -211,7 +214,7 @@
           '</div>' +
           provenanceSection() +
           // Events / passaging log
-          '<div class="field" style="grid-column:1/-1">' +
+          '<div class="field field--stacked" style="grid-column:1/-1">' +
             '<label>Events &amp; passaging</label>' +
             '<div id="wlpcEventsList" style="max-height:130px;overflow:auto;border:1px solid rgba(142, 142, 147,.18);border-radius:8px;background:rgba(20, 20, 22,.35)"></div>' +
             '<div style="display:flex;gap:6px;margin-top:6px;align-items:center;flex-wrap:wrap">' +
@@ -224,7 +227,9 @@
           '</div>' +
           '<div id="wlpcErr" class="form-status" style="grid-column:1/-1;color:#ff6961"></div>' +
         '</div>' +
-        '<div class="modal__footer" style="display:flex;gap:8px;align-items:center;padding:14px 16px">' +
+        // flex-wrap so the six actions form tidy rows on a narrow window instead of
+        // squashing until "View in Records" / "Media plan" wrap inside their pills.
+        '<div class="modal__footer" style="display:flex;gap:8px;align-items:center;padding:14px 16px;flex-wrap:wrap">' +
           '<button type="button" id="wlpcViewRecords" class="btn" title="Show this vessel in the Records table">View in Records</button>' +
           '<button type="button" id="wlpcMediaPlan" class="btn" title="Schedule media changes / feeds (dates, recurrence, volume) for this vessel">Media plan</button>' +
           '<button type="button" id="wlpcProtocol" class="btn" title="Define the protocol / SOP for the passage that produced this vessel">Protocol</button>' +
@@ -301,6 +306,10 @@
     if (!w.length) { box.innerHTML = ""; box.style.display = "none"; return; }
     box.style.display = "";
     box.style.color = "#ffd60a";
+    // Capped: a vessel with a dozen warnings would otherwise grow the list until it
+    // pushed the Save row out of the modal body.
+    box.style.maxHeight = "120px";
+    box.style.overflow = "auto";
     box.innerHTML =
       '<div style="font-weight:600;margin-bottom:4px">&#9888; ' + w.length +
       (w.length === 1 ? " thing to check" : " things to check") + "</div>" +
@@ -382,7 +391,10 @@
       '<input type="text" id="' + id + '" class="modal__input"></div>';
   }
   function fieldNum(id, label) {
-    return '<div class="field"><label for="' + id + '">' + label + '</label>' +
+    // Stacked like every other field: a bare .field puts the label inline, and the
+    // narrow number input (unlike the full-width text ones) doesn't wrap, so this
+    // was the one row whose label sat beside its control instead of above it.
+    return '<div class="field field--stacked"><label for="' + id + '">' + label + '</label>' +
       '<input type="number" id="' + id + '" class="modal__input" min="0" step="1"></div>';
   }
   function fieldDate(id, label) {
@@ -667,13 +679,14 @@
     var cols = 1;
     ids.forEach(function (id) { var p = window.parseWellId ? window.parseWellId(id) : null; if (p && p.col > cols) cols = p.col; });
     grid.style.display = "grid";
-    grid.style.maxHeight = "52vh";
+    // Capped so the per-well form below the grid stays on screen — editing a well
+    // whose fields are below the fold looks like nothing is happening.
+    grid.style.maxHeight = "min(34vh, 260px)";
     grid.style.overflow = "auto";
-    // Small plates (≤6 cols: 6/12/24-well) keep the true physical layout; big plates
-    // (96/384/1536-well) wrap into a scrollable grid of readable ~56px cells.
-    grid.style.gridTemplateColumns = cols <= 6
-      ? "repeat(" + cols + ", minmax(0, 1fr))"
-      : "repeat(auto-fill, minmax(56px, 1fr))";
+    // ALWAYS the plate's true geometry. An auto-fill fallback reflowed a 96-well
+    // (8×12) and a 384-well (16×24) plate alike into 9 ragged columns, so no visual
+    // column matched a plate column; now wide plates scroll sideways instead.
+    grid.style.gridTemplateColumns = "repeat(" + cols + ", minmax(" + (cols > 12 ? 34 : 40) + "px, 1fr))";
     grid.innerHTML = ids.map(function (id) {
       var w = draftWell(id), filled = wellFilled(w), sel = normWellId(id) === plateSel;
       var color = filled ? statusColor(w.status || "active") : "transparent";
@@ -778,8 +791,10 @@
       if (!badge) {
         badge = document.createElement("div");
         badge.className = "wlpc-badge";
+        // Sits just outside the node box: inside, it painted over the plate
+        // overlay's title and the tidy-timeline card's donor name.
         badge.style.cssText =
-          "position:absolute;top:3px;right:3px;display:flex;gap:3px;align-items:center;pointer-events:none;z-index:4";
+          "position:absolute;top:-8px;right:-6px;display:flex;gap:3px;align-items:center;pointer-events:none;z-index:8";
         n.appendChild(badge);
       }
       var dot = '<span title="' + esc(status) + '" style="width:9px;height:9px;border-radius:50%;background:' +
@@ -2302,7 +2317,10 @@
           '<g transform="translate(-11.5,-11.5) scale(0.36)" style="color:' + color + '">' + inner + "</g>" +
           '<text class="wlpc-tl-date" y="' + (NR + 12) + '" text-anchor="middle">' + (v.seedDate ? esc(shortDate(v.seedDate)) : "—") + "</text>" +
           (n > 1 ? '<circle class="wlpc-tl-count-bg" cx="' + (NR - 1) + '" cy="-' + (NR - 3) + '" r="8"/><text class="wlpc-tl-count" x="' + (NR - 1) + '" y="-' + (NR - 6) + '" text-anchor="middle">' + n + "</text>" : "") +
-          (v.isWell ? '<text class="wlpc-tl-well" x="' + (NR - 1) + '" y="-' + (NR - 4) + '" text-anchor="end">' + esc(v.well) + "</text>" : "") +
+          // Backed by its own chip and lifted clear of the ring — as bare text the
+          // well id straddled the node outline and was hard to read.
+          (v.isWell ? '<rect class="wlpc-tl-wellbg" x="' + (NR - 21) + '" y="' + (-NR - 10) + '" width="24" height="13" rx="6.5"/>' +
+            '<text class="wlpc-tl-well" x="' + (NR - 9) + '" y="' + (-NR - 1) + '" text-anchor="middle">' + esc(v.well) + "</text>" : "") +
           (uncertain ? '<text class="wlpc-tl-guess" x="-' + (NR - 1) + '" y="-' + (NR - 5) + '" text-anchor="end">?</text>' : "") +
           (anyFlag ? '<circle class="wlpc-tl-flag" cx="-' + (NR - 2) + '" cy="' + (NR - 3) + '" r="4"/>' : "") +
         "</g>";
@@ -2340,7 +2358,9 @@
     // Paint 🔬 icons BEFORE nodes so that when an imaging date coincides with a
     // vessel's seed date (same x on the band line) the vessel node is on top and
     // wins the click — the icon still opens elsewhere along the line.
-    return '<svg class="wlpc-tl-svg" viewBox="0 0 1000 ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + edges + imgIcons + nodes + "</svg>";
+    // Pinned to the 1000-unit design size (not width="100%"), so the drawing keeps
+    // 1:1 scale and its labels stay legible; .wlpc-tl scrolls sideways instead.
+    return '<svg class="wlpc-tl-svg" viewBox="0 0 1000 ' + H + '" width="1000" height="' + H + '" preserveAspectRatio="xMinYMid meet">' + bands + axis + edges + imgIcons + nodes + "</svg>";
   }
 
   // Show the records view (and hide the canvas + palette) while the recorder

@@ -5341,6 +5341,12 @@ function wireDropNode(drop) {
       nameInput.readOnly = true;
       nameInput.classList.add("node-label--readonly");
     });
+    // Restored/cloned nodes never run the create path, so size the label to its
+    // text here — otherwise a multi-line donor name loaded from a saved project
+    // renders clipped to one line. (Deliberately NOT touching readOnly or the
+    // node-label--readonly class: that class swaps the label's dark plate for a
+    // 5% white one, which on the culture map renders as a pale, low-contrast box.)
+    autosizeLabel(nameInput);
   }
   addHandles(drop);
   addResizeHandle(drop);

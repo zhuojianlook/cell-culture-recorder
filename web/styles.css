@@ -32,7 +32,10 @@ body {
 
 .page {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  /* minmax(0,1fr): a bare 1fr keeps min-width:auto, so one long unbreakable
+     donor id / label could force the whole app wider than the window and no
+     descendant could scroll. This lets the workspace track actually shrink. */
+  grid-template-columns: 260px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -695,6 +698,7 @@ body {
   cursor: grab;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
   box-shadow: var(--shadow);
+  overflow: hidden;
 }
 
 .icon-tile:active {
@@ -736,12 +740,28 @@ body {
   font-size: 13px;
   color: var(--muted);
   text-align: center;
+  /* A long single-word icon name (e.g. a cell-line label) would otherwise run past
+     the tile's rounded edge. */
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  hyphens: auto;
 }
 
 .workspace {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-width: 0; /* let the grid track shrink instead of overflowing the window */
+}
+
+/* On a normal desktop width the shell is a fixed-height pane: the palette and the
+   workspace each scroll internally, so reaching "Export Project Data" no longer
+   scrolls the toolbar and canvas off the top. Below 841px the layout collapses to
+   a single column (see the max-width:840px block), where page scrolling is right. */
+@media (min-width: 841px) {
+  .page { height: 100vh; overflow: hidden; }
+  .palette { height: 100%; min-height: 0; overflow-y: auto; }
+  .workspace { height: 100%; min-height: 0; }
 }
 
 .workspace.has-log-open {
@@ -756,6 +776,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 18px 22px;
   border-bottom: 1px solid var(--line);
   backdrop-filter: none;
@@ -773,7 +794,15 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Scroll the strip rather than letting the pills wrap into stacked
+     word-per-line blocks when the toolbar gets tight. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+.workspace-tabs::-webkit-scrollbar { display: none; }
 
 .workspace-tab {
   border: 1px solid var(--line);
@@ -783,6 +812,8 @@ body {
   font-weight: 600;
   padding: 7px 11px;
   border-radius: 999px;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .workspace-tab.is-active {
@@ -804,6 +835,11 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 0 0 auto;
+}
+
+.workspace__actions button {
+  white-space: nowrap;
 }
 
 .timeline-nav {
@@ -920,8 +956,10 @@ button:hover {
     radial-gradient(circle at 15% 20%, rgba(90, 127, 168, 0.08), transparent 28%),
     radial-gradient(circle at 80% 70%, rgba(252, 211, 77, 0.08), transparent 30%),
     #2c2c2e;
+  /* overflow-y:visible next to overflow-x:hidden is silently coerced to auto by
+     the spec, which produced a surprise vertical scrollbar. Be explicit. */
   overflow-x: hidden;
-  overflow-y: visible;
+  overflow-y: hidden;
   box-shadow: var(--shadow);
 }
 
@@ -1860,6 +1898,17 @@ button:hover {
   transform: translateY(-2px) scale(1.01);
   border-color: rgba(90, 127, 168, 0.6);
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.35);
+  /* Vessels are positioned by date, so neighbours placed a day apart overlap each
+     other's labels. Lift the hovered node (and make its label fully opaque) so any
+     label can be read in full without moving anything. */
+  z-index: 12;
+}
+
+.drop:hover .node-label,
+.node-label:focus {
+  z-index: 13;
+  background: rgba(17, 24, 39, 0.99);
+  border-color: rgba(90, 127, 168, 0.6);
 }
 
 .drop--pulse {
@@ -2297,7 +2346,9 @@ button:hover {
 }
 
 .modal-backdrop--center {
-  align-items: center;
+  /* `safe` degrades to flex-start once the modal is taller than the viewport, so
+     its header can never end up above the scrollable area (unreachable). */
+  align-items: safe center;
 }
 
 .modal-backdrop.is-hidden {
@@ -4718,6 +4769,13 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
   border-bottom: 0;
 }
 
+/* Footer actions keep their label on one line and their natural width, so a row of
+   them wraps cleanly instead of each pill squashing its text onto two lines. */
+.modal__footer .btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .drop--selected {
   border-color: rgba(90, 127, 168, 0.9);
   box-shadow: 0 0 0 3px rgba(90, 127, 168, 0.18), 0 12px 26px rgba(0, 0, 0, 0.35);
@@ -5224,7 +5282,10 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .admin-stat-card__label { font-size: 0.8125rem; color: var(--muted, #8e8e93); margin-top: 4px; }
 
 /* ── Cell Culture Records (recorder ledger) ───────────────────────────────── */
-.wlpc-view { flex: 1; margin: 18px; display: none; border: 1px solid rgba(142, 142, 147,.18); border-radius: 16px; background: var(--panel); overflow: auto; min-height: 0; }
+.wlpc-view { flex: 1; margin: 18px; display: none; border: 1px solid rgba(142, 142, 147,.18); border-radius: 16px; background: var(--panel); overflow: auto; min-height: 0; min-width: 0; }
+/* The table keeps a readable minimum and scrolls sideways inside the panel,
+   rather than widening the whole app until the window overflows. */
+#wlpcGridBody { overflow-x: auto; }
 .wlpc-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 16px 20px; border-bottom: 1px solid rgba(142, 142, 147,.16); }
 .wlpc-toolbar__title { margin: 0; font-size: 1.05rem; font-weight: 600; letter-spacing: -.01em; color: var(--text); }
 .wlpc-toolbar__sub { font-size: .8rem; color: var(--muted); margin-top: 2px; }
@@ -5238,23 +5299,36 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-banner { margin: 10px 20px; padding: 8px 12px; border-radius: 8px; font-size: .8rem; }
 .wlpc-banner--info { background: rgba(90, 127, 168,.12); color: var(--accent); }
 .wlpc-banner--err { background: rgba(255, 69, 58,.14); color: var(--danger); }
-.wlpc-table { width: 100%; border-collapse: collapse; font-size: .8125rem; color: var(--text); }
-.wlpc-table thead th { position: sticky; top: 0; z-index: 2; background: #1c1c1e; color: var(--muted); font-weight: 600; text-align: left; font-size: .7rem; letter-spacing: .04em; text-transform: uppercase; padding: 9px 12px; border-bottom: 1px solid rgba(142, 142, 147,.2); }
-.wlpc-table tbody td { padding: 9px 12px; border-top: 1px solid rgba(142, 142, 147,.1); vertical-align: middle; }
-.wlpc-table tr.wlpc-group td { position: sticky; top: 31px; z-index: 1; background: #3a3a3c; padding: 9px 14px; border-top: 1px solid rgba(142, 142, 147,.2); border-bottom: 1px solid rgba(142, 142, 147,.14); }
-.wlpc-group__name { color: var(--accent); font-weight: 600; }
-.wlpc-chip { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: rgba(90, 127, 168,.14); color: var(--accent); font-size: .66rem; font-weight: 600; vertical-align: 1px; }
-.wlpc-chip--warn { background: rgba(255, 69, 58,.16); color: var(--danger); }
+/* table-layout:fixed + explicit widths: without them the fixed-enum Status column
+   was starving the free-text ones, wrapping "6-well plate" onto two lines and
+   pushing rows to ~124px tall. Cells now ellipsis instead of wrapping. */
+.wlpc-table { width: 100%; min-width: 900px; table-layout: fixed; border-collapse: collapse; font-size: .8125rem; color: var(--text); --wlpc-thead-h: 32px; }
+.wlpc-table thead th { position: sticky; top: 0; z-index: 2; background: #1c1c1e; color: var(--muted); font-weight: 600; text-align: left; font-size: .7rem; letter-spacing: .04em; text-transform: uppercase; padding: 9px 12px; border-bottom: 1px solid rgba(142, 142, 147,.2); white-space: nowrap; }
+.wlpc-table thead th:last-child { text-align: center; }
+.wlpc-table tbody td { padding: 9px 12px; border-top: 1px solid rgba(142, 142, 147,.1); vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wlpc-table th:nth-child(1) { width: 23%; }
+.wlpc-table th:nth-child(2) { width: 56px; }
+.wlpc-table th:nth-child(3) { width: 104px; }
+.wlpc-table th:nth-child(4) { width: 132px; }
+.wlpc-table th:nth-child(5) { width: 20%; }
+.wlpc-table th:nth-child(6) { width: 104px; }
+.wlpc-table th:nth-child(7) { width: 18%; }
+.wlpc-table tr.wlpc-group td { position: sticky; top: var(--wlpc-thead-h); z-index: 1; background: #3a3a3c; padding: 9px 14px; border-top: 1px solid rgba(142, 142, 147,.2); border-bottom: 1px solid rgba(142, 142, 147,.14); overflow: visible; white-space: normal; }
+/* Lifted off the #3a3a3c group row, where the darker accent sat at 2.7:1. */
+.wlpc-group__name { color: #9dbfe0; font-weight: 600; }
+.wlpc-chip { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: rgba(157,191,224,.16); color: #9dbfe0; font-size: .7rem; font-weight: 600; vertical-align: 1px; }
+.wlpc-chip--warn { background: rgba(255, 69, 58,.2); color: #ff8a80; }
 .wlpc-table tbody tr[data-node-id] { cursor: pointer; transition: background .12s; }
 .wlpc-table tbody tr[data-node-id]:hover { background: rgba(229, 229, 234,.045); }
 .wlpc-col-label { font-weight: 600; padding-left: 28px !important; }
 .wlpc-col-p, .wlpc-col-date { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .wlpc-col-p { color: var(--muted); }
-.wlpc-col-warn { text-align: center; width: 50px; }
+.wlpc-col-warn { text-align: center; width: 64px; }
 .wlpc-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: .72rem; font-weight: 600; line-height: 1.4; border: 1px solid currentColor; }
 .wlpc-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.wlpc-warn { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; background: rgba(255, 69, 58,.16); color: var(--danger); font-size: .7rem; font-weight: 600; }
-.wlpc-ok { color: #48484a; }
+.wlpc-warn { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; background: rgba(255, 69, 58,.16); color: var(--danger); font-size: .7rem; font-weight: 600; white-space: nowrap; }
+/* was #48484a — 1.5:1 on the panel, effectively invisible */
+.wlpc-ok { color: #63a66a; }
 .wlpc-empty { padding: 48px 24px; text-align: center; color: var(--muted); line-height: 1.7; }
 .wlpc-empty strong { color: var(--accent); }
 /* ── Cell Culture family tree (Records → Tree view) ───────────────────────── */
@@ -5300,10 +5374,13 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-tag--warn { background: rgba(255, 214, 10, .16); color: #ffd60a; }
 
 /* ── Cell Culture lineage TIMELINE (Records → Timeline view) ──────────────── */
-.wlpc-tl { padding: 2px 10px 20px; }
+.wlpc-tl { padding: 2px 10px 20px; overflow-x: auto; overflow-y: hidden; }
 .wlpc-tl-group { margin-top: 14px; }
 .wlpc-tl-group .wlpc-tree-group__hd { padding: 4px 4px 2px; }
-.wlpc-tl-svg { display: block; width: 100%; overflow: visible; }
+/* Pinned to the 1000-unit design width. With width:100% the whole drawing was
+   uniformly scaled by panelWidth/1000, shrinking every label to 5-6px on a
+   narrow panel (and bloating it on a wide one). Now it scrolls instead. */
+.wlpc-tl-svg { display: block; width: 1000px; min-width: 1000px; max-width: none; height: auto; overflow: visible; }
 .wlpc-tl-edge { fill: none; stroke: rgba(142, 142, 147, .5); stroke-width: 1.4; }
 .wlpc-tl-axis { stroke: rgba(142, 142, 147, .28); stroke-width: 1; }
 .wlpc-tl-axlabel { fill: var(--muted); font-size: 11px; font-family: var(--font-display, sans-serif); }
@@ -5323,7 +5400,8 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-tl-split { fill: #64d2ff; font-size: 15px; font-weight: 700; }
 .wlpc-tl-count-bg { fill: #64d2ff; }
 .wlpc-tl-count { fill: #0b0b0c; font-size: 11px; font-weight: 800; font-family: var(--font-display, sans-serif); }
-.wlpc-tl-well { fill: #cfe3ff; font-size: 9px; font-weight: 800; font-family: var(--font-display, sans-serif); }
+.wlpc-tl-wellbg { fill: rgba(20,26,38,.94); stroke: rgba(120,170,255,.5); stroke-width: 1; }
+.wlpc-tl-well { fill: #cfe3ff; font-size: 10px; font-weight: 800; font-family: var(--font-display, sans-serif); }
 .wlpc-tl-node.is-cluster:hover .wlpc-tl-count-bg { filter: brightness(1.2); }
 
 /* ── ×N cluster expand panel (split-or-duplicate reconciliation) ──────────── */
@@ -5341,8 +5419,10 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-cl-meta { font-size: .72rem; color: var(--muted); }
 
 /* ── "Needs confirmation" reconciliation region (Records) ─────────────────── */
-.wlpc-reconcile { margin: 6px 10px 4px; border: 1px solid rgba(255,214,10,.28); border-radius: 12px; background: rgba(255,214,10,.045); overflow: hidden; }
-.wlpc-rc-hd { display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; user-select: none; }
+/* Capped so 90+ confirmation rows scroll inside the panel instead of pushing the
+   actual records table several screens down the page. */
+.wlpc-reconcile { margin: 6px 10px 4px; border: 1px solid rgba(255,214,10,.28); border-radius: 12px; background: rgba(255,214,10,.045); max-height: 55vh; overflow: hidden auto; overscroll-behavior: contain; }
+.wlpc-rc-hd { display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; user-select: none; position: sticky; top: 0; z-index: 3; background: #241f07; }
 .wlpc-rc-hd:hover { background: rgba(255,255,255,.03); }
 .wlpc-rc-title { font-weight: 700; color: var(--text); font-size: .9rem; }
 .wlpc-rc-count { min-width: 20px; text-align: center; padding: 1px 8px; border-radius: 999px; font-size: .75rem; font-weight: 800; }
@@ -5352,11 +5432,19 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpc-rc-chev { margin-left: auto; color: var(--muted); font-size: .75rem; }
 .wlpc-rc-sec { padding: 4px 14px 10px; border-top: 1px solid rgba(255,255,255,.05); }
 .wlpc-rc-sec-hd { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 8px 0 6px; font-weight: 700; }
-.wlpc-rc-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; flex-wrap: wrap; }
-.wlpc-rc-main { flex: 1; min-width: 220px; display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+/* flex-start so expanding a provenance table doesn't float the action buttons to
+   the row's vertical middle. */
+.wlpc-rc-row { display: flex; align-items: flex-start; gap: 10px; padding: 5px 0; flex-wrap: wrap; }
+/* flex-basis keeps the intended sizing, min-width:0 lets it actually shrink — with
+   min-width:220px a long donor id / ground-truth string escaped the box and painted
+   underneath the action buttons. */
+.wlpc-rc-main { flex: 1 1 220px; min-width: 0; display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+.wlpc-rc-id, .wlpc-rc-hint { overflow-wrap: anywhere; }
 .wlpc-rc-id { font-weight: 600; color: var(--text); font-size: .84rem; }
 .wlpc-rc-eye { font-size: .68rem; font-weight: 700; color: #64d2ff; }
-.wlpc-rc-gt { font-size: .72rem; color: #ff9f0a; }
+/* Clamped to two lines (full text in the title tooltip) — an unclamped ground-truth
+   string could make a single confirm row a whole screen tall. */
+.wlpc-rc-gt { font-size: .72rem; color: #ff9f0a; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .wlpc-rc-src { font-size: .66rem; font-weight: 700; color: #30d158; background: rgba(48,209,88,.14); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
 .wlpc-rc-cflist { display: flex; flex-direction: column; gap: 5px; width: 100%; margin-top: 5px; }
 .wlpc-rc-cf { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -5380,14 +5468,17 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 
 /* ── Provenance + human-confirm-all (donor ground truth) ──────────────────── */
 /* inline "where a value came from" (file :: tab :: column), muted, inside buttons */
-.wlpc-rc-prov { display: inline-block; margin-left: 5px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; font-size: .64rem; font-weight: 400; color: var(--muted); opacity: .85; }
+.wlpc-rc-prov { display: inline-block; margin-left: 5px; max-width: min(320px, 45%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; font-size: .64rem; font-weight: 400; color: var(--muted); opacity: .85; }
 .wlpc-rc-cf-opt.is-on .wlpc-rc-prov { color: inherit; opacity: .8; }
 /* expandable per-field source table */
-.wlpc-rc-prov-det { display: block; margin-top: 4px; }
+/* Own full-width line inside the flex row, and the table scrolls rather than being
+   clipped by the panel with no scrollbar. */
+.wlpc-rc-prov-det { flex: 1 0 100%; min-width: 0; margin-top: 4px; }
+.wlpc-rc-prov-det[open] { overflow-x: auto; }
 .wlpc-rc-prov-det > summary { cursor: pointer; font-size: .68rem; color: var(--muted); font-weight: 600; list-style: none; }
 .wlpc-rc-prov-det > summary::before { content: "▸ "; }
 .wlpc-rc-prov-det[open] > summary::before { content: "▾ "; }
-.wlpc-rc-pvtab { border-collapse: collapse; margin: 5px 0 2px; font-size: .7rem; }
+.wlpc-rc-pvtab { border-collapse: collapse; margin: 5px 0 2px; font-size: .7rem; max-width: 100%; }
 .wlpc-rc-pvtab th { text-align: left; color: var(--muted); font-weight: 600; padding: 1px 12px 3px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
 .wlpc-rc-pvtab td { padding: 2px 12px 2px 0; color: var(--text); vertical-align: top; }
 .wlpc-rc-pvsrc { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .66rem; overflow-wrap: anywhere; }
@@ -5420,18 +5511,24 @@ input[type="time"]::-webkit-datetime-edit-fields-wrapper {
 .wlpw-well-empty { font-size: 1rem; color: #8e8e93; line-height: 1; }
 /* table: plate summary + per-well sub-rows */
 .wlpc-plate-sum > td { border-top: 1px solid rgba(255,255,255,.06); }
-.wlpc-plate-hint { font-size: .68rem; color: var(--muted); margin-left: 8px; }
+.wlpc-plate-hint { font-size: .72rem; color: #a8a8ae; margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wlpc-table tbody tr[data-plate-id] { cursor: pointer; }
 .wlpc-table tbody tr[data-plate-id]:hover > td { background: rgba(120,170,255,.09); }
 .wlpc-well-row > td { background: rgba(120,170,255,.05); }
-.wlpc-well-row .wlpc-col-label { padding-left: 40px !important; }
-.wlpc-well-tag { display: inline-block; min-width: 26px; text-align: center; font-size: .64rem; font-weight: 700; color: #cfe3ff; background: rgba(120,170,255,.16); border-radius: 5px; padding: 1px 5px; margin-right: 6px; }
+/* An inset rule instead of a 40px padding indent: the old indent left ~47px for the
+   donor text in the label column, wrapping it onto three lines. */
+.wlpc-well-row .wlpc-col-label { padding-left: 22px !important; box-shadow: inset 12px 0 0 -11px rgba(120,170,255,.45); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlpc-well-tag { display: inline-block; min-width: 22px; text-align: center; font-size: .64rem; font-weight: 700; color: #cfe3ff; background: rgba(120,170,255,.16); border-radius: 5px; padding: 1px 4px; margin-right: 5px; }
 /* canvas plate glyph: seeded wells coloured by status + a "N seeded" badge */
 .plate-glyph-well { transition: fill 120ms ease; }
 .plate-records-badge {
-  position: absolute; bottom: 3px; left: 3px; z-index: 4; pointer-events: none;
+  /* Straddles the bottom edge instead of sitting inside, where it covered the
+     plate overlay's well rows. */
+  position: absolute; bottom: -9px; left: 50%; transform: translateX(-50%);
+  z-index: 4; pointer-events: none;
   font: 700 9px/1 system-ui, -apple-system, sans-serif; color: #0b0b0c; background: #64d2ff;
   border: 1.5px solid #2c2c2e; border-radius: 8px; padding: 2px 5px; white-space: nowrap;
+  max-width: calc(100% + 12px); overflow: hidden; text-overflow: ellipsis;
 }
 
 /* ── Cell Culture map: tidy-timeline lane bands + vessel cards ─────────────── */
