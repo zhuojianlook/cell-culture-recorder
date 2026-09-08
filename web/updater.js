@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.58", date: "2026-07-03", changes: [
+      "Performance: switching between the Cell Culture map and Cell Culture Records is much snappier, and the map no longer feels janky while idle. The needs-attention warnings for every vessel are now computed in a single pass (indexed by donor/eye, label and source id) instead of re-scanning all ~600 vessels once per vessel — so the map's status badges (which refresh on a timer), the Records table, and the Timeline all render in roughly linear time. Vessel status badges also skip redundant redraws when nothing changed.",
+    ] },
     { version: "0.2.57", date: "2026-07-03", changes: [
       "Review fixes + UI polish. Bugs: a microscopy 🔬 icon on the same date as a vessel no longer steals that vessel's click; canvas plate glyphs no longer wash out their seeded-well colours under the media overlay; a seeded plate used in a lineage no longer drops its connector / falsely flags its child as orphan on the Timeline; browsing through empty wells no longer creates phantom “seeded” wells, and clearing every well now sticks (no ghost A1 on reload); plate well sub-rows in the table now show their Medium; the “N vessels” count agrees between Table and Timeline.",
       "The donor “Confirm & apply” list is no longer a dead-end past 30: an “Apply all exact single matches (N)” bulk button, a donor-id filter, and a “Show 30 more” pager. The per-well plate editor now works for 24/96/384-well plates (scrolling grid), warns before discarding unsaved wells (and on Escape), moved “Remove this well” to the footer with a confirm, autofocuses the donor field, and has a clearer selected-well highlight. A “loose match” now reads amber (distinct from the red opposite-cornea / year-mismatch), and long provenance paths no longer balloon the conflict buttons.",

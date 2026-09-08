@@ -250,6 +250,29 @@ test("cultureWarnings: field tagging + dedup", () => {
   assert.deepEqual(ws[1].fields, ["seedDate"]);
 });
 
+test("cultureWarningsBatch equals per-record cultureWarnings (perf refactor)", () => {
+  // A set exercising every peer-dependent rule: duplicate labels, parent lineage
+  // (passage/seed/donor/eye mismatches), donor+eye monotonicity, and raw-source
+  // conflicts — plus records that share nothing, so buckets of size 0/1/N are hit.
+  const records = [
+    { nodeId: "n-1", donor: "6769", eye: "OD", passage: "0", seedDate: "2026-05-01", label: "6769 OD T75", rawSourceIdentifier: "T-12" },
+    { nodeId: "n-2", donor: "6769", eye: "OD", passage: "1", seedDate: "2026-04-20", label: "6769 OD T75", parentNodeId: "n-1", rawSourceIdentifier: "T 12", sourceRecordType: "primary_tissue_dissociation", iconId: "t75_flask" },
+    { nodeId: "n-3", donor: "6769", eye: "OS", passage: "2", seedDate: "2026-05-10", label: "6769 OS", parentNodeId: "n-1" },
+    { nodeId: "n-4", donor: "9999", eye: "OD", passage: "3", seedDate: "2026-05-20", label: "9999", parentNodeId: "n-2" },
+    { nodeId: "n-5", donor: "", eye: "unknown", passage: "", seedDate: "", label: "" },
+    { nodeId: "n-6", donor: "6769", eye: "OD", passage: "1", seedDate: "2026-06-01", label: "dup?", dissociationDate: "2026-06-05", rawSourceIdentifier: "T-12" },
+  ];
+  const batch = L.cultureWarningsBatch(records);
+  // Every record's batched warnings must equal the standalone per-record call.
+  records.forEach((r) => {
+    assert.deepEqual(batch[r.nodeId], L.cultureWarnings(r, records),
+      "mismatch for " + r.nodeId + ": " + JSON.stringify(batch[r.nodeId]) + " vs " + JSON.stringify(L.cultureWarnings(r, records)));
+  });
+  // And it must actually be finding warnings (not trivially both-empty).
+  const total = Object.keys(batch).reduce((n, id) => n + batch[id].length, 0);
+  assert.ok(total > 0, "expected the mixed set to raise some warnings");
+});
+
 test("recordMatchesQuery searches across fields", () => {
   const r = { donor: "6769", eye: "OD", passage: "2", medium: "F99", status: "frozen", iconId: "t75_flask", label: "6769 OD P2" };
   assert.equal(L.recordMatchesQuery(r, ""), true); // empty matches all

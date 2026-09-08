@@ -764,10 +764,17 @@
     var nodes = allCultureVessels();
     if (!nodes.length) return;
     var records = nodes.map(recordOf);
+    // One batched warnings pass (O(N)) instead of N×O(N). This also runs on the
+    // 1.2s syncView tick while the map is active, so keeping it cheap matters.
+    var warnMap = LOGIC().cultureWarningsBatch(records);
     nodes.forEach(function (n, i) {
-      var warns = LOGIC().cultureWarnings(records[i], records).length;
+      var warns = (warnMap[String(records[i].nodeId)] || []).length;
       var status = read(n, "Status", "active");
       var badge = n.querySelector(".wlpc-badge");
+      // The badge is fully determined by (status, warn-count); skip the innerHTML
+      // write (a reflow) when neither changed — the common no-change tick case.
+      var sig = status + "|" + warns;
+      if (badge && badge.dataset.sig === sig) return;
       if (!badge) {
         badge = document.createElement("div");
         badge.className = "wlpc-badge";
@@ -782,6 +789,7 @@
           'style="background:#ff453a;color:#2c2c2e;font:600 9px/1 system-ui;border-radius:8px;padding:2px 4px;border:1.5px solid #2c2c2e">&#9888; ' + warns + "</span>"
         : "";
       badge.innerHTML = dot + warn;
+      badge.dataset.sig = sig;
     });
   }
   window.wlpRenderCultureBadges = renderBadges;
@@ -820,10 +828,11 @@
 
   // Warning messages (strings) for a node. Pass a precomputed peer-record list
   // to avoid re-gathering for every grid row.
-  function warningsFor(node, peers) {
-    return LOGIC()
-      .cultureWarnings(recordOf(node), peers || allRecords())
-      .map(function (w) { return w.message; });
+  function warningsFor(node, peers, warnMap) {
+    var w = warnMap
+      ? (warnMap[String(node.dataset.nodeId)] || [])
+      : LOGIC().cultureWarnings(recordOf(node), peers || allRecords());
+    return w.map(function (x) { return x.message; });
   }
 
   function compareNodes(a, b) {
@@ -855,12 +864,15 @@
 
   // The records to display after applying search + status + needs-attention
   // filters. Warnings are still computed against ALL records (peers) for context.
-  function filteredRecords(all) {
+  function filteredRecords(all, warnMap) {
     var q = filterQuery.trim();
     return all.filter(function (r) {
       if (q && !LOGIC().recordMatchesQuery(r, q)) return false;
       if (filterStatus !== "all" && (r.status || "active") !== filterStatus) return false;
-      if (filterNeedsAttn && !LOGIC().cultureWarnings(r, all).length) return false;
+      if (filterNeedsAttn) {
+        var w = warnMap ? (warnMap[String(r.nodeId)] || []) : LOGIC().cultureWarnings(r, all);
+        if (!w.length) return false;
+      }
       return true;
     });
   }
@@ -939,8 +951,11 @@
   }
 
   // Subtitle shared by both views: "N vessels (M of N when filtered) · K need attention".
-  function updateSubtitle(all, shown) {
-    var flagged = all.filter(function (r) { return LOGIC().cultureWarnings(r, all).length; }).length;
+  function updateSubtitle(all, shown, warnMap) {
+    var flagged = all.filter(function (r) {
+      var w = warnMap ? (warnMap[String(r.nodeId)] || []) : LOGIC().cultureWarnings(r, all);
+      return w.length;
+    }).length;
     var filtered = shown.length !== all.length;
     view.querySelector("#wlpcGridSub").textContent =
       (filtered ? shown.length + " of " + all.length + " vessels" : all.length + (all.length === 1 ? " vessel" : " vessels")) +
@@ -1526,11 +1541,12 @@
     if (!buildView()) return;
     var body = view.querySelector("#wlpcGridBody");
     var peers = allRecords(); // all records — warnings computed against the full set
-    var shown = filteredRecords(peers);
+    var warnMap = LOGIC().cultureWarningsBatch(peers); // one O(N) pass, reused below
+    var shown = filteredRecords(peers, warnMap);
     var shownIds = {};
     shown.forEach(function (r) { shownIds[r.nodeId] = true; });
     var vessels = allCultureVessels().filter(function (n) { return shownIds[n.dataset.nodeId]; }).sort(compareNodes);
-    updateSubtitle(peers, shown);
+    updateSubtitle(peers, shown, warnMap);
     if (!vessels.length) {
       body.innerHTML = emptyMessage(peers.length > 0);
       return;
@@ -1547,7 +1563,7 @@
     });
 
     function vesselRow(n) {
-      var w = warningsFor(n, peers);
+      var w = warningsFor(n, peers, warnMap);
       var status = read(n, "Status", "active");
       var pass = read(n, "Passage", "");
       var warn = w.length
@@ -1604,7 +1620,7 @@
     }
 
     var bodyRows = groups.map(function (g) {
-      var warnN = g.nodes.filter(function (n) { return warningsFor(n, peers).length; }).length;
+      var warnN = g.nodes.filter(function (n) { return warningsFor(n, peers, warnMap).length; }).length;
       var countChip = '<span class="wlpc-chip">' + g.nodes.length + (g.nodes.length === 1 ? " vessel" : " vessels") + "</span>";
       var warnChip = warnN ? '<span class="wlpc-chip wlpc-chip--warn">' + warnN + " to check</span>" : "";
       var header =
@@ -2090,11 +2106,13 @@
     if (!buildView()) return;
     var body = view.querySelector("#wlpcGridBody");
     var all = allRecordsExpanded(); // each seeded plate well is its own timeline point
-    var shown = filteredRecords(all);
+    var warnMapAll = LOGIC().cultureWarningsBatch(all); // warnings vs the fanned-out set
+    var shown = filteredRecords(all, warnMapAll);
     // Count physical vessels (nodes) in the subtitle so it matches the Table view —
     // the timeline still *renders* the fanned-out per-well points.
     var nodeRecs = allRecords();
-    updateSubtitle(nodeRecs, filteredRecords(nodeRecs));
+    var warnMapNode = LOGIC().cultureWarningsBatch(nodeRecs); // warnings vs physical nodes
+    updateSubtitle(nodeRecs, filteredRecords(nodeRecs, warnMapNode), warnMapNode);
     var forest = LOGIC().buildLineageForest(shown);
     if (!forest.length) {
       body.innerHTML = emptyMessage(all.length > 0);
@@ -2121,7 +2139,7 @@
       (function collect(nodes) { nodes.forEach(function (n) { g.vessels.push(n.record); collect(n.children || []); }); })(g.roots);
       g.vessels.forEach(function (r) {
         var f = flags[String(r.nodeId)] || {};
-        if (f.orphan || f.crossDonor || f.passageBack || LOGIC().cultureWarnings(r, all).length) g.issues++;
+        if (f.orphan || f.crossDonor || f.passageBack || (warnMapAll[String(r.nodeId)] || []).length) g.issues++;
       });
     });
 

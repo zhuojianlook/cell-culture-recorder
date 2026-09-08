@@ -131,13 +131,42 @@
       " flask; keep the tissue source as a separate raw-source record";
   }
 
+  // A peer index for the warning checks: bucket the records by the keys each
+  // peer-dependent rule filters on, so a check scans only its own small bucket
+  // (its donor+eye group, its label, its source id) instead of every peer. Built
+  // ONCE and shared across all records by cultureWarningsBatch (O(N) total); a
+  // lone cultureWarnings() call builds a throwaway index from its `peers` (same
+  // result, one O(N) pass). The self-record is excluded per-check via nodeId, so
+  // every bucket after that filter is exactly the old `others.filter(...)` subset.
+  var WARN_SEP = "";
+  function buildWarnIndex(records) {
+    records = records || [];
+    var byId = Object.create(null), byLabel = Object.create(null),
+        byDonorEye = Object.create(null), bySourceId = Object.create(null);
+    records.forEach(function (r) {
+      byId[str(r.nodeId)] = r;
+      var lab = str(r.label).trim().toLowerCase();
+      if (lab) (byLabel[lab] || (byLabel[lab] = [])).push(r);
+      var dn = str(r.donor).trim().toLowerCase();
+      if (dn) {
+        var k = dn + WARN_SEP + (str(r.eye).trim() || "unknown");
+        (byDonorEye[k] || (byDonorEye[k] = [])).push(r);
+      }
+      var sid = normalizeSourceId(str(r.rawSourceIdentifier).trim());
+      if (sid) (bySourceId[sid] || (bySourceId[sid] = [])).push(r);
+    });
+    return { byId: byId, byLabel: byLabel, byDonorEye: byDonorEye, bySourceId: bySourceId };
+  }
+
   // Needs-attention warnings for a record, given its peer records (the other
   // vessels in the project). Each warning is { fields, message } — `fields` tags
   // the editable field(s) it concerns so the UI can highlight the exact cell(s).
   // Ported from the original recorder's buildDraftWarnings (the lineage + passage
   // /date consistency rules that the current field set supports; the provenance
   // /ground-truth rules will be added when that schema lands).
-  function cultureWarnings(record, peers) {
+  // `ctx` is an optional prebuilt buildWarnIndex(peers) (used by the batch path);
+  // when omitted, one is built from `peers`.
+  function cultureWarnings(record, peers, ctx) {
     record = record || {};
     var W = [];
     function add(fields, message) { W.push({ fields: fields, message: message }); }
@@ -147,7 +176,8 @@
     var eye = str(record.eye).trim() || "unknown";
     var passage = num(record.passage);
     var seedMs = dateMs(record.seedDate);
-    var others = (peers || []).filter(function (p) { return str(p.nodeId) !== str(record.nodeId); });
+    var selfId = str(record.nodeId);
+    var idx = ctx || buildWarnIndex(peers || []);
 
     // Required fields
     if (!str(record.donor).trim()) add(["donor"], "No donor ID — vessel will be grouped under unknown donor.");
@@ -155,7 +185,7 @@
 
     // Duplicate label
     if (label) {
-      var dups = others.filter(function (p) { return str(p.label).trim().toLowerCase() === label; });
+      var dups = (idx.byLabel[label] || []).filter(function (p) { return str(p.nodeId) !== selfId; });
       if (dups.length) {
         add(["label"], "Duplicate vessel label (" + dups.map(recLabel).join(", ") + "). Verify this is a distinct flask.");
       }
@@ -164,7 +194,8 @@
     // Parent (lineage) consistency
     var parent = null;
     if (record.parentNodeId) {
-      parent = others.filter(function (p) { return str(p.nodeId) === str(record.parentNodeId); })[0] || null;
+      var pcand = idx.byId[str(record.parentNodeId)];
+      parent = (pcand && str(pcand.nodeId) !== selfId) ? pcand : null;
     }
     if (parent) {
       var pPass = num(parent.passage);
@@ -185,11 +216,11 @@
       }
     }
 
-    // Passage/date monotonicity among same donor + eye peers
+    // Passage/date monotonicity among same donor + eye peers (the byDonorEye
+    // bucket already contains exactly those peers, so no per-peer donor/eye recheck).
     if (donor && passage !== null && !isNaN(seedMs)) {
-      others.forEach(function (p) {
-        if (str(p.donor).trim().toLowerCase() !== donor) return;
-        if ((str(p.eye).trim() || "unknown") !== eye) return;
+      (idx.byDonorEye[donor + WARN_SEP + eye] || []).forEach(function (p) {
+        if (str(p.nodeId) === selfId) return;
         var oPass = num(p.passage);
         var oSeed = dateMs(p.seedDate);
         if (oPass === null || isNaN(oSeed)) return;
@@ -254,8 +285,10 @@
     var sourceId = normalizeSourceId(str(record.rawSourceIdentifier).trim());
     if (sourceId) {
       var suggested = suggestSourceConflictRename(record);
-      others.forEach(function (p) {
-        if (normalizeSourceId(str(p.rawSourceIdentifier).trim()) !== sourceId) return;
+      // The bySourceId bucket already holds the same-source peers; still filter by
+      // eye here since the bucket is keyed on source id alone.
+      (idx.bySourceId[sourceId] || []).forEach(function (p) {
+        if (str(p.nodeId) === selfId) return;
         if ((str(p.eye).trim() || "unknown") !== eye) return;
         var pType = str(p.sourceRecordType) || "culture_vessel";
         if (pType !== sourceType) {
@@ -291,6 +324,18 @@
       seen[w.message] = true;
       return true;
     });
+  }
+
+  // Warnings for EVERY record in one pass. Builds the peer index once and reuses
+  // it, so the whole set costs ~O(N) instead of N × O(N) (one cultureWarnings call
+  // per record, each re-scanning all peers). Returns { nodeId: warnings[] }.
+  // Behaviour is identical to calling cultureWarnings(r, records) for each r.
+  function cultureWarningsBatch(records) {
+    records = records || [];
+    var idx = buildWarnIndex(records);
+    var out = Object.create(null);
+    records.forEach(function (r) { out[str(r.nodeId)] = cultureWarnings(r, records, idx); });
+    return out;
   }
 
   // Free-text match across a record's searchable fields (donor, label, eye,
@@ -971,6 +1016,7 @@
     shouldOverwriteLabel: shouldOverwriteLabel,
     recordMatchesQuery: recordMatchesQuery,
     cultureWarnings: cultureWarnings,
+    cultureWarningsBatch: cultureWarningsBatch,
     SOURCE_RECORD_TYPES: SOURCE_RECORD_TYPES,
     GROUND_TRUTH_DATE_FIELDS: GROUND_TRUTH_DATE_FIELDS,
     isFlaskOrDishIcon: isFlaskOrDishIcon,
