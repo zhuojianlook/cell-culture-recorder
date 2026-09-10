@@ -33,6 +33,9 @@
   // the "what's new" list shown when an update is available. Append a new entry
   // here each release.
   var CHANGELOG = [
+    { version: "0.2.60", date: "2026-09-10", changes: [
+      "Records → Timeline is much easier to read. When several vessels share the same seed date — most obviously every well of one plate — they now fan out sideways along that date instead of stacking into a tall vertical column. The microscopy 🔬 markers moved into their own lane just below each passage row, so they no longer sit on top of the vessel circles or their dates. And the date axis no longer prints a date twice when a vessel already sits on the first or last date.",
+    ] },
     { version: "0.2.59", date: "2026-09-08", changes: [
       "Display fixes across the whole app. The root cause of many of them: every inline style in the app was being silently blocked by the desktop shell's content-security policy, so elements meant to be hidden (a stray “Choose File” control, an empty grey bar) were showing, and status pills lost their colour. Those now render correctly — Active is green again.",
       "Things you could not reach or read are fixed: the culture-record editor now keeps its title and the Save row on screen and scrolls its fields (before, on a short window, the top of the form and the Save button were off-screen); the Timeline no longer shrinks its own labels to an unreadable size on a narrow panel; the “Needs confirmation” panel is capped and scrolls, instead of pushing the records table several screens down; and the left palette scrolls, so Storage / Export Project Data are always reachable.",

@@ -2257,17 +2257,44 @@
     var bandKeys = [], sBand = {};
     clusters.forEach(function (c) { if (!sBand[c.pk]) { sBand[c.pk] = true; bandKeys.push(c.pk); } });
     bandKeys.sort(function (a, b) { if (a === "?") return 1; if (b === "?") return -1; return a - b; });
-    var bandTop = {}, bandRows = {}, y = TOP;
+    var IMG_LANE = 26; // a dedicated row beneath the nodes for this band's 🔬 points
+    var bandTop = {}, bandRows = {}, bandImgY = {}, y = TOP;
+    var sameMs = function (a, b) { return (isNaN(a) && isNaN(b)) || a === b; };
     bandKeys.forEach(function (k) {
       var arr = clusters.filter(function (c) { return c.pk === k; }).sort(function (a, b) { return baseX(a) - baseX(b); });
+      // Fan clusters that share the SAME seed date (e.g. every well of one plate,
+      // all seeded the same day) HORIZONTALLY around that date, so they spread
+      // sideways instead of piling into a tall column of rows.
+      var gi = 0;
+      while (gi < arr.length) {
+        var gj = gi;
+        while (gj + 1 < arr.length && sameMs(arr[gj + 1].ms, arr[gi].ms)) gj++;
+        if (gj > gi) {
+          var span = Math.min((gj - gi) * MINGAP, RIGHT - LEFT);
+          var stepx = span / (gj - gi);
+          var cx = baseX(arr[gi]);
+          var x0 = Math.max(LEFT, Math.min(RIGHT - span, cx - span / 2));
+          for (var gk = gi; gk <= gj; gk++) arr[gk]._sx = x0 + (gk - gi) * stepx;
+        } else {
+          arr[gi]._sx = baseX(arr[gi]);
+        }
+        gi = gj + 1;
+      }
+      // Row-pack on the spread positions; a second row only appears when even the
+      // horizontal fan can't keep neighbours MINGAP apart.
+      var packed = arr.slice().sort(function (a, b) { return a._sx - b._sx; });
       var lastX = [];
-      arr.forEach(function (c) { var x = baseX(c), row = 0; for (; row < lastX.length; row++) { if (lastX[row] <= x - MINGAP) break; } lastX[row] = x; c._x = x; c._row = row; });
+      packed.forEach(function (c) { var x = c._sx, row = 0; for (; row < lastX.length; row++) { if (lastX[row] <= x - MINGAP) break; } lastX[row] = x; c._x = x; c._row = row; });
       var rows = Math.max(1, lastX.length);
       bandTop[k] = y; bandRows[k] = rows;
       arr.forEach(function (c) { c._y = y + c._row * SUBH + SUBH / 2; });
-      y += rows * SUBH;
+      // Reserve a lane below the node rows for this band's imaging points, so a 🔬
+      // sitting on the same date as a vessel no longer overlaps its ring/label.
+      var hasImg = imgByBand[k] && Object.keys(imgByBand[k]).length;
+      bandImgY[k] = hasImg ? (y + rows * SUBH + IMG_LANE / 2) : null;
+      y += rows * SUBH + (hasImg ? IMG_LANE : 0);
     });
-    var H = y + 18;
+    var H = y + 30; // bottom padding so the date axis clears the last band's node labels
 
     // Lineage edges between CLUSTERS (parent's cluster → child's cluster), deduped.
     // One independent link per parent→daughter vessel (no per-cluster dedup), so a
@@ -2292,9 +2319,13 @@
     var axis = "";
     if (datedC.length && maxMs > minMs) {
       var yb = H - 4;
+      // Skip an endpoint label when a vessel node already sits exactly on that date
+      // (its own date caption is right there) — avoids printing the same date twice.
+      var hasMinNode = datedC.some(function (c) { return c.ms === minMs; });
+      var hasMaxNode = datedC.some(function (c) { return c.ms === maxMs; });
       axis = '<line class="wlpc-tl-axis" x1="' + LEFT + '" y1="' + yb + '" x2="' + RIGHT + '" y2="' + yb + '"/>' +
-        '<text class="wlpc-tl-axlabel" x="' + LEFT + '" y="' + (yb - 4) + '" text-anchor="start">' + esc(shortDate(new Date(minMs).toISOString().slice(0, 10))) + "</text>" +
-        '<text class="wlpc-tl-axlabel" x="' + RIGHT + '" y="' + (yb - 4) + '" text-anchor="end">' + esc(shortDate(new Date(maxMs).toISOString().slice(0, 10))) + "</text>";
+        (hasMinNode ? "" : '<text class="wlpc-tl-axlabel" x="' + LEFT + '" y="' + (yb - 4) + '" text-anchor="start">' + esc(shortDate(new Date(minMs).toISOString().slice(0, 10))) + "</text>") +
+        (hasMaxNode ? "" : '<text class="wlpc-tl-axlabel" x="' + RIGHT + '" y="' + (yb - 4) + '" text-anchor="end">' + esc(shortDate(new Date(maxMs).toISOString().slice(0, 10))) + "</text>");
     }
 
     var nodes = "";
@@ -2333,8 +2364,8 @@
     var IMG_R = 7, IMG_SEP = 15;
     var imgIcons = "";
     Object.keys(imgByBand).forEach(function (pk) {
-      if (bandTop[pk] == null) return;
-      var yc = bandTop[pk] + bandRows[pk] * SUBH / 2;
+      if (bandImgY[pk] == null) return;
+      var yc = bandImgY[pk]; // the dedicated imaging lane below this band's nodes
       var band = imgByBand[pk];
       var entries = Object.keys(band).map(function (d) { return { d: d, e: band[d], x: xOf(band[d].ms) }; });
       entries.sort(function (a, b) { return a.x - b.x; });
