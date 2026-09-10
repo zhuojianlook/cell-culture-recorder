@@ -6,7 +6,8 @@
   "scripts": {
     "tauri": "tauri",
     "test": "node --test tests/",
-    "fix:dropbox": "bash scripts/fix-dropbox-inodes.sh"
+    "fix:dropbox": "bash scripts/fix-dropbox-inodes.sh",
+    "install:local": "bash scripts/install-local.sh"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.0"
